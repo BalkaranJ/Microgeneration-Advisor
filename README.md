@@ -31,6 +31,7 @@ Simple. That's the whole idea.
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
+python -m pytest test_app.py -v
 ```
 
 Your browser should pop open automatically. If it doesn't, just go to `http://localhost:8501`.
