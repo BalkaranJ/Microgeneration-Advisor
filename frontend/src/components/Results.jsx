@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion'
+import RoofSolarCard from './RoofSolarCard'
 
 function ScoreRing({ score, color, label }) {
   const r  = 30
@@ -65,19 +66,21 @@ export default function Results({ results, onReset }) {
         </div>
       </motion.div>
 
-      <motion.div className="card recommendation-card" {...fadeUp(0.16)}>
+      <RoofSolarCard roofSolarPotential={results.roof_solar_potential} fadeUp={fadeUp(0.16)} />
+
+      <motion.div className="card recommendation-card" {...fadeUp(0.24)}>
         <p className="recommendation-label">Recommendation</p>
         <p className="recommendation-text">{results.recommendation}</p>
       </motion.div>
 
-      <motion.div className="card" {...fadeUp(0.24)}>
+      <motion.div className="card" {...fadeUp(0.32)}>
         <p className="section-label">Before you go further</p>
         {results.checklist.map((item, i) => (
           <ChecklistItem key={i} text={item} />
         ))}
       </motion.div>
 
-      <motion.button className="reset-btn" onClick={onReset} {...fadeUp(0.3)}>
+      <motion.button className="reset-btn" onClick={onReset} {...fadeUp(0.4)}>
         Start over
       </motion.button>
     </div>
