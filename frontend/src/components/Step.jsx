@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import BillUpload from './BillUpload'
+import AddressConfirm from './AddressConfirm'
 
 export default function Step({ step, onAnswer, error }) {
   const [value, setValue] = useState('')
@@ -23,6 +24,8 @@ export default function Step({ step, onAnswer, error }) {
 
       {step.type === 'bill-upload' ? (
         <BillUpload onAnswer={onAnswer} error={error} />
+      ) : step.type === 'address-confirm' ? (
+        <AddressConfirm onAnswer={onAnswer} error={error} placeholder={step.placeholder} />
       ) : step.type === 'choice' ? (
         <div className="choices">
           {step.choices.map(choice => (

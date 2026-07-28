@@ -1,14 +1,17 @@
 """
-Unit tests for the FastAPI backend's scoring logic (advisor.py). Solar-only:
-wind scoring was removed when the product pivoted to solar.
+Unit tests for the FastAPI backend's domain logic (advisor.py). Solar-only:
+wind scoring was removed when the product pivoted to solar. Weather-based
+suitability scoring was removed in favor of the roof-capacity verdict in
+solar.py.
 """
 
 import unittest
 from advisor import (
     MicrogenerationProject,
-    WeatherProfile,
-    SolarSuitabilityScorer,
+    ProjectClassifier,
+    ReadinessAdvisor,
     InvalidProjectInputError,
+    estimate_target_system_size_kw,
 )
 
 
@@ -20,12 +23,10 @@ class TestValidProjectInput(unittest.TestCase):
             location="Calgary, Alberta, Canada",
             annual_usage_kwh=9000,
             system_size_kw=8.0,
-            customer_type="Residential",
         )
         self.assertEqual(project.get_location(), "Calgary, Alberta, Canada")
         self.assertEqual(project.get_annual_usage(), 9000)
         self.assertEqual(project.get_system_size(), 8.0)
-        self.assertEqual(project.get_customer_type(), "Residential")
 
 
 class TestInvalidSystemSize(unittest.TestCase):
@@ -37,7 +38,6 @@ class TestInvalidSystemSize(unittest.TestCase):
                 location="Calgary, Alberta, Canada",
                 annual_usage_kwh=9000,
                 system_size_kw=0,
-                customer_type="Residential",
             )
 
     def test_negative_system_size_raises_error(self):
@@ -46,7 +46,6 @@ class TestInvalidSystemSize(unittest.TestCase):
                 location="Calgary, Alberta, Canada",
                 annual_usage_kwh=9000,
                 system_size_kw=-5,
-                customer_type="Residential",
             )
 
 
@@ -59,7 +58,6 @@ class TestInvalidAnnualUsage(unittest.TestCase):
                 location="Calgary, Alberta, Canada",
                 annual_usage_kwh=0,
                 system_size_kw=8.0,
-                customer_type="Residential",
             )
 
     def test_negative_annual_usage_raises_error(self):
@@ -68,7 +66,6 @@ class TestInvalidAnnualUsage(unittest.TestCase):
                 location="Calgary, Alberta, Canada",
                 annual_usage_kwh=-100,
                 system_size_kw=8.0,
-                customer_type="Residential",
             )
 
 
@@ -81,60 +78,81 @@ class TestMissingLocation(unittest.TestCase):
                 location="",
                 annual_usage_kwh=9000,
                 system_size_kw=8.0,
-                customer_type="Residential",
             )
 
 
-class TestSolarScorer(unittest.TestCase):
-    """Test Case 5: Solar scorer returns a score between 0 and 100 with a reason."""
+class TestProjectClassifier(unittest.TestCase):
+    """Test Case 5: describe() no longer references a customer type."""
 
     def setUp(self):
-        self.scorer = SolarSuitabilityScorer()
-        self.weather = WeatherProfile(
-            location="Calgary",
-            solar_indicator=78,
-            cloud_cover=30,
+        self.classifier = ProjectClassifier()
+
+    def test_describe_small_has_no_customer_type_wording(self):
+        project = MicrogenerationProject(
+            location="Calgary, Alberta, Canada",
+            annual_usage_kwh=9000,
+            system_size_kw=5.5,
         )
+        self.assertEqual(self.classifier.describe(project), "Small solar microgeneration concept")
 
-    def test_solar_score_in_range(self):
-        score = self.scorer.calculate_score(self.weather)
-        self.assertGreaterEqual(score, 0)
-        self.assertLessEqual(score, 100)
-
-    def test_solar_reason_is_string(self):
-        score = self.scorer.calculate_score(self.weather)
-        reason = self.scorer.generate_reason(score)
-        self.assertIsInstance(reason, str)
-        self.assertGreater(len(reason), 0)
-
-    def test_solar_reason_mentions_solar(self):
-        score = self.scorer.calculate_score(self.weather)
-        reason = self.scorer.generate_reason(score)
-        self.assertIn("Solar", reason)
-
-
-class TestScoreBoundary(unittest.TestCase):
-    """Test Case 6: Extreme weather values are clamped and stay within 0 to 100."""
-
-    def test_solar_score_does_not_exceed_100(self):
-        scorer = SolarSuitabilityScorer()
-        weather = WeatherProfile(
-            location="Medicine Hat",
-            solar_indicator=200,
-            cloud_cover=0,
+    def test_describe_medium_has_no_customer_type_wording(self):
+        project = MicrogenerationProject(
+            location="Calgary, Alberta, Canada",
+            annual_usage_kwh=9000,
+            system_size_kw=50,
         )
-        score = scorer.calculate_score(weather)
-        self.assertLessEqual(score, 100)
+        self.assertEqual(self.classifier.describe(project), "Medium solar microgeneration concept")
 
-    def test_solar_score_does_not_go_below_0(self):
-        scorer = SolarSuitabilityScorer()
-        weather = WeatherProfile(
-            location="Medicine Hat",
-            solar_indicator=0,
-            cloud_cover=500,
+    def test_describe_large_returns_category_as_is(self):
+        project = MicrogenerationProject(
+            location="Calgary, Alberta, Canada",
+            annual_usage_kwh=9000,
+            system_size_kw=200,
         )
-        score = scorer.calculate_score(weather)
-        self.assertGreaterEqual(score, 0)
+        self.assertEqual(self.classifier.describe(project), self.classifier.classify(project))
+
+
+class TestEstimateTargetSystemSize(unittest.TestCase):
+    """Test Case 6: fallback system-size estimate targets a conservative ~80% offset."""
+
+    def test_estimate_uses_conservative_offset_of_default_yield(self):
+        self.assertEqual(estimate_target_system_size_kw(9000), 5.54)
+
+    def test_estimate_scales_with_custom_yield_and_offset(self):
+        # 10,000 kWh usage, 100% offset target, 1000 kWh/kW yield -> 10 kW
+        result = estimate_target_system_size_kw(10000, yield_kwh_per_kw=1000, offset_target=1.0)
+        self.assertEqual(result, 10.0)
+
+    def test_zero_annual_usage_raises_error(self):
+        with self.assertRaises(InvalidProjectInputError):
+            estimate_target_system_size_kw(0)
+
+    def test_negative_annual_usage_raises_error(self):
+        with self.assertRaises(InvalidProjectInputError):
+            estimate_target_system_size_kw(-100)
+
+
+class TestReadinessAdvisorAssess(unittest.TestCase):
+    """Test Case 7: ReadinessAdvisor is a lean classification+checklist facade now."""
+
+    def test_assess_returns_classification_size_category_and_checklist_only(self):
+        project = MicrogenerationProject(
+            location="Calgary, Alberta, Canada",
+            annual_usage_kwh=9000,
+            system_size_kw=8.0,
+        )
+        result = ReadinessAdvisor().assess(project)
+        self.assertEqual(set(result.keys()), {"classification", "size_category", "checklist"})
+
+    def test_checklist_is_nonempty_list_of_strings(self):
+        project = MicrogenerationProject(
+            location="Calgary, Alberta, Canada",
+            annual_usage_kwh=9000,
+            system_size_kw=8.0,
+        )
+        checklist = ReadinessAdvisor().assess(project)["checklist"]
+        self.assertGreater(len(checklist), 0)
+        self.assertTrue(all(isinstance(item, str) for item in checklist))
 
 
 if __name__ == "__main__":

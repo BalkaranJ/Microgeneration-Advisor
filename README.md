@@ -14,11 +14,12 @@ This app tries to be the starting point that pulls that thinking together in one
 
 ## What it does
 
-You plug in your address, tell it your rough energy usage and proposed system size, and it spits out:
+You plug in your address (confirming the exact resolved location) and your rough annual energy usage, and it spits out:
 
-- A solar suitability score for your location, based on real weather data
-- A plain-language recommendation based on those scores
-- A readiness checklist of things to sort out before you go any further
+- A system sized to whatever your roof can actually hold, using a current leading panel wattage (via Google's Solar API when available, or a rough usage-based estimate otherwise)
+- The panel count, system size, and estimated yearly production for that roof
+- A plain verdict — covers everything with credit to spare, covers part of your bill, or the roof's too small to make a real dent — plus the assumptions behind the numbers and a disclaimer
+- A readiness checklist of things to sort out before you go any further, and a (for-now placeholder) vendors/next-steps section
 
 Simple. That's the whole idea.
 
@@ -28,7 +29,7 @@ Simple. That's the whole idea.
 
 The app is split into two pieces:
 
-- **`backend/`** — a FastAPI service. `main.py` exposes `/geocode` and `/assess` endpoints, `advisor.py` holds the scoring/classification logic, and `weather.py` calls out to Nominatim (geocoding) and Open-Meteo (weather) so scores are based on real data for any address, not a fixed list of cities.
+- **`backend/`** — a FastAPI service. `main.py` exposes `/geocode` and `/assess` endpoints, `advisor.py` holds the classification/checklist logic, `weather.py` calls out to Nominatim for geocoding, and `solar.py` calls Google's Solar API to size a system from the roof and build the verdict report.
 - **`frontend/`** — a React + Vite app that walks the user through a conversational, one-question-at-a-time form and calls the backend to render the results.
 
 ## How to run it
@@ -81,35 +82,34 @@ Or via the helper script from the repo root: `bash Phase3/scripts/run_tests.sh`.
 
 ## How the code is put together
 
-### The scoring logic — `backend/advisor.py`
+### Classification & checklist — `backend/advisor.py`
 
-- `MicrogenerationProject` — bundles and validates the user's inputs (location, energy usage, system size, customer type). Validation failures raise a custom `InvalidProjectInputError`, which the API layer turns into a friendly 422 response instead of a crash.
-- `WeatherProfile` — a clean, encapsulated wrapper around the solar indicator for a location.
-- `SuitabilityScorer` (abstract) with `SolarSuitabilityScorer` — a scoring strategy that weighs sunlight and subtracts a cloud penalty. Kept as an abstract base for a single concrete strategy, so a future generation type could be reintroduced without touching the facade.
-- `ProjectClassifier` — categorises the project as small (≤10 kW), medium (≤150 kW), or large/out-of-scope, and builds a fuller label like "Small residential solar microgeneration concept."
-- `ReadinessAdvisor` — the facade. One method, `assess()`, hides all the steps: scoring, classifying the project, building the recommendation text, and returning a tidy results dictionary.
+- `MicrogenerationProject` — bundles and validates the user's inputs (location, energy usage, system size). Validation failures raise a custom `InvalidProjectInputError`, which the API layer turns into a friendly 422 response instead of a crash.
+- `estimate_target_system_size_kw()` — a rule-of-thumb sizing function: targets a conservative ~80% offset of annual usage at an assumed Alberta-wide yield (1,300 kWh/kW/year). Used only as the fallback size when Google Solar roof data isn't available — see `solar.py` below for the primary, roof-based sizing.
+- `ProjectClassifier` — categorises the project as small (≤10 kW), medium (≤150 kW), or large/out-of-scope, and builds a fuller label like "Small solar microgeneration concept."
+- `ReadinessAdvisor` — a lean facade. One method, `assess()`, classifies the project and returns the readiness checklist. The actual production/offset verdict lives entirely in `solar.py`'s report, not here (a generic weather-based suitability score used to live here too, but was dropped in favor of that more concrete, roof-specific verdict).
 
-### Real weather data — `backend/weather.py`
+### Geocoding — `backend/weather.py`
 
-`geocode()` resolves a free-text address to coordinates via Nominatim. `fetch_weather()` pulls the past week of hourly solar radiation and cloud cover from Open-Meteo for those coordinates and averages it into the same 0–100 indicator the scorer expects — so any address works, not just a fixed list of Alberta cities.
+`geocode()` resolves a free-text address to coordinates via Nominatim. The frontend calls this directly (via `/geocode`) as an address-confirmation step before submitting the full assessment — see below.
 
-### Roof-level solar data — `backend/solar.py`
+### Roof-based sizing & verdict — `backend/solar.py`
 
-Calls Google's Solar API (`buildingInsights:findClosest`) for the geocoded address and, defensively, pulls out roof/production data: usable roof area, max sunshine hours/year, and a list of panel-array configurations ranging from small to large. `select_closest_config()` matches that list to the user's proposed system size, and `build_comparison()` weighs the matched config's estimated annual production against the bill-derived `annual_usage_kwh` — using a $/kWh rate computed from the bill's own charge and metered usage — to estimate an offset percentage and rough annual savings. Entirely additive: if Google has no imagery for an address, the key isn't configured, or the request fails for any reason, `get_building_solar_summary()` returns an `"available": False` result instead of raising, so `/assess` always falls back cleanly to the weather-based score.
+Calls Google's Solar API (`buildingInsights:findClosest`) for the confirmed coordinates and, defensively, pulls out roof/production data. `size_to_max_roof_capacity()` sizes the system to this roof's *maximum* buildable panel count, re-rated to a disclosed "leading panel wattage" assumption (440W, vs. Google's own often-lower per-panel assumption) — Google's own shading/tilt/orientation-aware production estimate for that max config is kept and scaled by the wattage ratio rather than using a flat rule of thumb. `build_comparison()` weighs that production against the bill-derived `annual_usage_kwh` (using a $/kWh rate computed from the bill's own charge and metered usage) to get an offset percentage and rough annual savings, and `classify_verdict()` turns the offset into one of three plain verdicts: full coverage (≥100%), partial coverage (25-99%), or too small to make a dent (<25%) — thresholds documented in `build_assumptions()`, shown to the user alongside a disclaimer. Entirely best-effort: if Google has no imagery for an address, the key isn't configured, or the request fails for any reason, `get_building_solar_summary()` returns an `"available": False` result instead of raising, so `/assess` always falls back cleanly to a rough usage-based size estimate.
 
 ### The API — `backend/main.py`
 
-A thin FastAPI layer with two endpoints, `/geocode` and `/assess`, that wire the above pieces together and translate exceptions into proper HTTP error responses.
+A thin FastAPI layer with three endpoints: `/geocode` (address string → resolved coordinates, called by the frontend's address-confirmation step), `/assess` (confirmed coordinates + usage → scored results, including a calculated `recommended_system_size_kw`), and `/extract-bill`. Wires the above pieces together and translates exceptions into proper HTTP error responses.
 
 ### The UI — `frontend/`
 
-Built with React + Vite. `App.jsx` drives a conversational, one-question-at-a-time flow (see `components/Step.jsx` and `AnswerBubble.jsx`), then calls `/assess` and renders the result via `components/Results.jsx`.
+Built with React + Vite. `App.jsx` drives a conversational, one-question-at-a-time flow — just address and annual usage now — (see `components/Step.jsx`, `components/AddressConfirm.jsx`, and `AnswerBubble.jsx`), then calls `/assess` and renders the result via `components/Results.jsx`, which composes `RoofSolarCard.jsx` (the sizing/verdict/assumptions report), the readiness checklist, and `VendorsNextSteps.jsx` (currently a placeholder — no vendor names yet). The address step calls `/geocode` first and requires the user to confirm the resolved address before continuing, since free-text geocoding can occasionally resolve to the wrong building on ambiguously-named streets.
 
 ---
 
 ## Status
 
-Working prototype. Uses live geocoding and weather data. No mobile optimization yet. More coming if there's interest.
+Working prototype. Uses live geocoding and, where configured, live roof imagery. No mobile optimization yet. More coming if there's interest.
 
 ---
 
