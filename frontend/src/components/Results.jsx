@@ -56,16 +56,11 @@ export default function Results({ results, onReset }) {
         <p className="section-label">Suitability scores</p>
         <div className="scores-row">
           <ScoreRing score={results.solar.score} color="#f59e0b" label="Solar" />
-          <ScoreRing score={results.wind.score}  color="#38bdf8" label="Wind"  />
         </div>
         <div className="score-cards">
           <div className="score-card solar">
             <p className="score-card-title">☀️ Solar — {results.solar.rating}</p>
             <p className="score-card-reason">{results.solar.reason}</p>
-          </div>
-          <div className="score-card wind">
-            <p className="score-card-title">💨 Wind — {results.wind.rating}</p>
-            <p className="score-card-reason">{results.wind.reason}</p>
           </div>
         </div>
       </motion.div>
