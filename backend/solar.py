@@ -13,6 +13,8 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 
+from irradiance import aggregate_monthly_irradiance, distribute_annual_production, fetch_daily_irradiance
+
 load_dotenv()
 
 SOLAR_API_URL = "https://solar.googleapis.com/v1/buildingInsights:findClosest"
@@ -146,7 +148,55 @@ def size_to_max_roof_capacity(parsed: dict, leading_panel_watts: float = LEADING
         "google_panel_capacity_watts": google_panel_capacity_watts,
         "system_size_kw": round(max_config["panelsCount"] * leading_panel_watts / 1000, 2),
         "estimated_annual_production_kwh": round(max_config["yearlyEnergyDcKwh"] * wattage_ratio, 1),
+        "roof_segment_summaries": max_config.get("roofSegmentSummaries") or [],
     }
+
+
+COMPASS_BOUNDARIES = [
+    (22.5, "N"), (67.5, "NE"), (112.5, "E"), (157.5, "SE"),
+    (202.5, "S"), (247.5, "SW"), (292.5, "W"), (337.5, "NW"),
+]
+COMPASS_ORDER = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+
+def azimuth_to_compass(azimuth_degrees: float) -> str:
+    """
+    Buckets a roof segment's azimuth into an 8-point compass direction.
+    Google's azimuthDegrees convention: 0=N, 90=E, 180=S, 270=W.
+    """
+    az = azimuth_degrees % 360
+    for boundary, label in COMPASS_BOUNDARIES:
+        if az < boundary:
+            return label
+    return "N"
+
+
+def summarize_roof_orientation(roof_segment_summaries: list, wattage_ratio: float) -> list:
+    """
+    Groups a panel config's per-segment roofSegmentSummaries by compass
+    direction, summing panel count and (wattage-ratio-scaled, so it stays
+    consistent with the headline production number) yearly production per
+    direction. Lets a user see e.g. "11 panels fit on the south side" —
+    useful for reconciling Google's whole-roof max against a real
+    installer's quote, which typically only uses the best-facing segments.
+    Returns [] if there's no usable per-segment data.
+    """
+    by_direction = {}
+    for seg in roof_segment_summaries or []:
+        panels = seg.get("panelsCount")
+        azimuth = seg.get("azimuthDegrees")
+        if panels is None or azimuth is None:
+            continue
+        direction = azimuth_to_compass(azimuth)
+        entry = by_direction.setdefault(direction, {"direction": direction, "panels_count": 0, "estimated_annual_production_kwh": 0.0})
+        entry["panels_count"] += panels
+        entry["estimated_annual_production_kwh"] += (seg.get("yearlyEnergyDcKwh") or 0.0) * wattage_ratio
+
+    result = [by_direction[d] for d in COMPASS_ORDER if d in by_direction]
+    for entry in result:
+        entry["estimated_annual_production_kwh"] = round(entry["estimated_annual_production_kwh"], 1)
+    result.sort(key=lambda e: e["panels_count"], reverse=True)
+    return result
 
 
 def classify_verdict(offset_pct: Optional[float]) -> dict:
@@ -161,21 +211,6 @@ def classify_verdict(offset_pct: Optional[float]) -> dict:
     if offset_pct >= OFFSET_PARTIAL_COVERAGE_PCT:
         return {"verdict": "partial_coverage", "verdict_message": "This roof can cover part of your annual bill."}
     return {"verdict": "too_small", "verdict_message": "This roof is too small to make a real dent in your usage."}
-
-
-def build_assumptions(panel_watts_assumed: float, google_panel_capacity_watts: float) -> list:
-    return [
-        "Sized to this roof's maximum buildable panel count from Google Solar imagery — not a usage-targeted size.",
-        f"Assumes {panel_watts_assumed:.0f}W panels (a current leading high-efficiency residential panel), "
-        f"vs. Google's own {google_panel_capacity_watts:.0f}W modeling assumption for this roof — annual "
-        "production is scaled by that wattage ratio.",
-        "Annual production reuses Google Solar's shading/tilt/orientation-aware model for this roof's max-panel configuration.",
-        f"Verdict bands: {OFFSET_FULL_COVERAGE_PCT}%+ offset = full coverage, "
-        f"{OFFSET_PARTIAL_COVERAGE_PCT}-{OFFSET_FULL_COVERAGE_PCT - 1}% = partial, "
-        f"below {OFFSET_PARTIAL_COVERAGE_PCT}% = too small to matter.",
-        "Savings only credit energy generated and used on-site at your bill's effective rate; grid-exported "
-        "surplus isn't credited here.",
-    ]
 
 
 def build_comparison(
@@ -218,11 +253,50 @@ def build_comparison(
     return result
 
 
+async def _build_monthly_breakdown(
+    lat: float,
+    lon: float,
+    estimated_annual_production_kwh: float,
+    monthly_usage_history: Optional[list],
+    rate_per_kwh: Optional[float],
+) -> list:
+    """
+    Best-effort: fetches real historical solar irradiance for this exact
+    location over the trailing 365 days and uses it to distribute the
+    roof's annual production estimate across actual calendar months, then
+    left-joins the user's own bill-extracted monthly usage/cost history
+    (matched by YYYY-MM). Never raises — [] on any failure, so the
+    frontend can just hide this section.
+    """
+    try:
+        daily = await fetch_daily_irradiance(lat, lon)
+        monthly_irradiance = aggregate_monthly_irradiance(daily)
+        monthly_production = distribute_annual_production(monthly_irradiance, estimated_annual_production_kwh)
+    except Exception:
+        return []
+
+    usage_by_month = {m["month"]: m for m in (monthly_usage_history or []) if m.get("month")}
+    breakdown = []
+    for p in monthly_production:
+        usage_entry = usage_by_month.get(p["month"])
+        breakdown.append({
+            "month": p["month"],
+            "estimated_production_kwh": p["estimated_production_kwh"],
+            "estimated_production_value_cad": (
+                round(p["estimated_production_kwh"] * rate_per_kwh, 2) if rate_per_kwh is not None else None
+            ),
+            "actual_usage_kwh": usage_entry.get("kwh") if usage_entry else None,
+            "actual_cost_cad": usage_entry.get("cost") if usage_entry else None,
+        })
+    return breakdown
+
+
 async def get_building_solar_summary(
     lat: float,
     lon: float,
     annual_usage_kwh: float,
     rate_per_kwh: Optional[float] = None,
+    monthly_usage_history: Optional[list] = None,
     api_key: Optional[str] = None,
 ) -> dict:
     """
@@ -263,6 +337,11 @@ async def get_building_solar_summary(
 
         comparison = build_comparison(sized["estimated_annual_production_kwh"], annual_usage_kwh, rate_per_kwh)
         verdict = classify_verdict(comparison["offset_pct"])
+        wattage_ratio = sized["panel_watts_assumed"] / sized["google_panel_capacity_watts"]
+        roof_orientation = summarize_roof_orientation(sized["roof_segment_summaries"], wattage_ratio)
+        monthly_breakdown = await _build_monthly_breakdown(
+            lat, lon, sized["estimated_annual_production_kwh"], monthly_usage_history, rate_per_kwh
+        )
 
         return {
             "available": True,
@@ -280,7 +359,8 @@ async def get_building_solar_summary(
             "comparison": comparison,
             "verdict": verdict["verdict"],
             "verdict_message": verdict["verdict_message"],
-            "assumptions": build_assumptions(sized["panel_watts_assumed"], sized["google_panel_capacity_watts"]),
+            "roof_orientation": roof_orientation,
+            "monthly_breakdown": monthly_breakdown,
             "disclaimer": DISCLAIMER_TEXT,
         }
     except Exception:
