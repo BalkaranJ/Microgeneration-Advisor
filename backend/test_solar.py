@@ -11,12 +11,14 @@ from solar import (
     SolarApiNoCoverage,
     SolarApiNotConfigured,
     SolarApiRequestError,
+    build_assumptions,
     build_comparison,
+    classify_verdict,
     effective_rate_per_kwh,
     fetch_building_insights,
     get_building_solar_summary,
     parse_solar_potential,
-    select_closest_config,
+    size_to_max_roof_capacity,
 )
 
 SAMPLE_BUILDING_INSIGHTS = {
@@ -109,36 +111,75 @@ class TestParseSolarPotential(unittest.TestCase):
         self.assertIsNone(parsed["imagery_date"])
 
 
-class TestSelectClosestConfig(unittest.TestCase):
+class TestSizeToMaxRoofCapacity(unittest.TestCase):
     def setUp(self):
         self.parsed = parse_solar_potential(SAMPLE_BUILDING_INSIGHTS)
 
-    def test_picks_exact_match(self):
-        config = select_closest_config(self.parsed, system_size_kw=8.0)
-        self.assertEqual(config["panels_count"], 20)
-        self.assertEqual(config["matched_system_size_kw"], 8.0)
-        self.assertEqual(config["estimated_annual_production_kwh"], 9451.0)
-        self.assertFalse(config["roof_capacity_exceeded"])
+    def test_sizes_to_largest_config_panel_count(self):
+        sized = size_to_max_roof_capacity(self.parsed)
+        self.assertEqual(sized["panels_count"], 24)
 
-    def test_picks_nearest_when_no_exact_match(self):
-        # 7.5 kW -> 18.75 target panels; nearest of {16, 20} is 20 (diff 1.25 vs 2.75)
-        config = select_closest_config(self.parsed, system_size_kw=7.5)
-        self.assertEqual(config["panels_count"], 20)
+    def test_system_size_uses_leading_panel_watts_not_google_wattage(self):
+        sized = size_to_max_roof_capacity(self.parsed, leading_panel_watts=440)
+        # 24 panels * 440W / 1000, NOT Google's own 400W (24*400/1000 = 9.6)
+        self.assertEqual(sized["system_size_kw"], 10.56)
+        self.assertNotEqual(sized["system_size_kw"], 9.6)
 
-    def test_flags_roof_capacity_exceeded(self):
-        config = select_closest_config(self.parsed, system_size_kw=20.0)
-        self.assertTrue(config["roof_capacity_exceeded"])
-        self.assertEqual(config["panels_count"], 24)  # still returns the largest available config
+    def test_production_scaled_by_wattage_ratio(self):
+        sized = size_to_max_roof_capacity(self.parsed, leading_panel_watts=440)
+        # 11341.2 * (440/400) = 12475.32 -> rounds to 12475.3
+        self.assertEqual(sized["estimated_annual_production_kwh"], 12475.3)
+
+    def test_custom_leading_panel_watts_param(self):
+        sized = size_to_max_roof_capacity(self.parsed, leading_panel_watts=350)
+        self.assertEqual(sized["system_size_kw"], round(24 * 350 / 1000, 2))
+        self.assertEqual(sized["estimated_annual_production_kwh"], round(11341.2 * 350 / 400, 1))
 
     def test_none_when_no_configs(self):
         parsed = parse_solar_potential({"solarPotential": {"panelCapacityWatts": 400}})
-        self.assertIsNone(select_closest_config(parsed, system_size_kw=8.0))
+        self.assertIsNone(size_to_max_roof_capacity(parsed))
 
     def test_none_when_no_panel_capacity(self):
         parsed = parse_solar_potential({
             "solarPotential": {"solarPanelConfigs": [{"panelsCount": 4, "yearlyEnergyDcKwh": 100}]}
         })
-        self.assertIsNone(select_closest_config(parsed, system_size_kw=8.0))
+        self.assertIsNone(size_to_max_roof_capacity(parsed))
+
+
+class TestClassifyVerdict(unittest.TestCase):
+    def test_full_coverage_at_boundary(self):
+        self.assertEqual(classify_verdict(100)["verdict"], "full_coverage")
+
+    def test_full_coverage_above_boundary(self):
+        self.assertEqual(classify_verdict(150.5)["verdict"], "full_coverage")
+
+    def test_partial_coverage_at_boundary(self):
+        self.assertEqual(classify_verdict(25)["verdict"], "partial_coverage")
+
+    def test_partial_coverage_just_below_full(self):
+        self.assertEqual(classify_verdict(99.9)["verdict"], "partial_coverage")
+
+    def test_too_small_just_below_partial_boundary(self):
+        self.assertEqual(classify_verdict(24.9)["verdict"], "too_small")
+
+    def test_too_small_at_zero(self):
+        self.assertEqual(classify_verdict(0)["verdict"], "too_small")
+
+    def test_unknown_when_offset_none(self):
+        self.assertEqual(classify_verdict(None)["verdict"], "unknown")
+
+
+class TestBuildAssumptions(unittest.TestCase):
+    def test_returns_nonempty_list_of_strings(self):
+        assumptions = build_assumptions(440, 400)
+        self.assertGreater(len(assumptions), 0)
+        self.assertTrue(all(isinstance(a, str) for a in assumptions))
+
+    def test_mentions_leading_and_google_wattage_values(self):
+        assumptions = build_assumptions(440, 400)
+        joined = " ".join(assumptions)
+        self.assertIn("440", joined)
+        self.assertIn("400", joined)
 
 
 class TestBuildComparison(unittest.TestCase):
@@ -197,41 +238,44 @@ class TestFetchBuildingInsights(unittest.IsolatedAsyncioTestCase):
 class TestGetBuildingSolarSummary(unittest.IsolatedAsyncioTestCase):
     async def test_success_path(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)):
-            summary = await get_building_solar_summary(
-                51.05, -114.07, system_size_kw=8.0, annual_usage_kwh=9000, rate_per_kwh=0.15
-            )
+            summary = await get_building_solar_summary(51.05, -114.07, annual_usage_kwh=9000, rate_per_kwh=0.15)
         self.assertTrue(summary["available"])
-        self.assertEqual(summary["matched_config"]["panels_count"], 20)
+        self.assertEqual(summary["panels_count"], 24)
+        self.assertEqual(summary["system_size_kw"], 10.56)
+        self.assertEqual(summary["estimated_annual_production_kwh"], 12475.3)
+        self.assertIn(summary["verdict"], {"full_coverage", "partial_coverage", "too_small"})
+        self.assertGreater(len(summary["assumptions"]), 0)
+        self.assertIsNotNone(summary["disclaimer"])
         self.assertIsNotNone(summary["comparison"]["estimated_annual_savings_cad"])
 
     async def test_no_coverage_degrades_gracefully(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNoCoverage("nope"))):
-            summary = await get_building_solar_summary(51.05, -114.07, 8.0, 9000)
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "no_coverage")
 
     async def test_not_configured_degrades_gracefully(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNotConfigured("no key"))):
-            summary = await get_building_solar_summary(51.05, -114.07, 8.0, 9000)
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "not_configured")
 
     async def test_request_error_collapses_to_error(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiRequestError("bad key"))):
-            summary = await get_building_solar_summary(51.05, -114.07, 8.0, 9000)
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "error")
 
     async def test_unexpected_exception_collapses_to_error(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=RuntimeError("boom"))):
-            summary = await get_building_solar_summary(51.05, -114.07, 8.0, 9000)
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "error")
 
     async def test_no_panel_data_when_configs_missing(self):
         malformed = {"solarPotential": {}}
         with patch("solar.fetch_building_insights", new=AsyncMock(return_value=malformed)):
-            summary = await get_building_solar_summary(51.05, -114.07, 8.0, 9000)
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "no_panel_data")
 
