@@ -36,7 +36,7 @@ async def fetch_weather(lat: float, lon: float, location_name: str) -> WeatherPr
     Pull real solar and wind data from Open-Meteo for the given coordinates
     and return a WeatherProfile the scoring classes can use.
 
-    We request the past 7 days of hourly data and average it to get
+    We request the past 365 days of hourly data and average it to get
     stable indicators rather than using a single snapshot.
     """
     async with httpx.AsyncClient() as client:
