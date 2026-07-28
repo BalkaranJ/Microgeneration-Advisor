@@ -60,8 +60,8 @@ export default function App() {
   const completedSteps = STEPS.slice(0, currentStep)
   const activeStep     = STEPS[currentStep]
 
-  async function handleAnswer(value) {
-    const newAnswers = { ...answers, [activeStep.id]: value }
+  async function handleAnswer(value, meta) {
+    const newAnswers = { ...answers, [activeStep.id]: value, ...(meta ? { billMeta: meta } : {}) }
     setAnswers(newAnswers)
     setError(null)
 
@@ -74,10 +74,12 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            address:          newAnswers.address,
-            annual_usage_kwh: parseFloat(newAnswers.annual_usage_kwh),
-            system_size_kw:   parseFloat(newAnswers.system_size_kw),
-            customer_type:    newAnswers.customer_type,
+            address:                      newAnswers.address,
+            annual_usage_kwh:             parseFloat(newAnswers.annual_usage_kwh),
+            system_size_kw:               parseFloat(newAnswers.system_size_kw),
+            customer_type:                newAnswers.customer_type,
+            electricity_charge_incl_gst:  newAnswers.billMeta?.electricity_charge_incl_gst ?? null,
+            bill_period_usage_kwh:        newAnswers.billMeta?.bill_period_usage_kwh ?? null,
           }),
         })
         const data = await res.json()

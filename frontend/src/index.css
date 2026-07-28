@@ -573,6 +573,86 @@ body::before {
   line-height: 1.5;
 }
 
+/* ─── Roof & Solar Potential ─────────────────────────── */
+
+.roof-source-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-bottom: 14px;
+}
+
+.roof-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.roof-stat {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.roof-stat-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.roof-stat-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.offset-badge {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 20px;
+  padding: 6px 12px;
+  margin-bottom: 10px;
+}
+
+.offset-badge.offset-positive {
+  color: var(--green);
+  background: rgba(52,211,153,0.1);
+  border: 1px solid rgba(52,211,153,0.25);
+}
+
+.offset-badge.offset-negative {
+  color: var(--amber);
+  background: var(--amber-dim);
+  border: 1px solid rgba(245,158,11,0.2);
+}
+
+.offset-detail {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.roof-savings {
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.savings-note-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.roof-unavailable-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
 .recommendation-card {
   background: rgba(99,102,241,0.06);
   border: 1px solid rgba(99,102,241,0.18);
