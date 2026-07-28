@@ -5,8 +5,6 @@ FastAPI backend — exposes three endpoints:
   POST /extract-bill   utility bill photo -> extracted usage data
 """
 
-import asyncio
-
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -15,8 +13,9 @@ from advisor import (
     MicrogenerationProject,
     ReadinessAdvisor,
     InvalidProjectInputError,
+    estimate_target_system_size_kw,
 )
-from weather import geocode, fetch_weather
+from weather import geocode
 from bill_extractor import extract_bill_usage, BillExtractionError
 from solar import get_building_solar_summary, effective_rate_per_kwh
 
@@ -37,10 +36,10 @@ class GeocodeRequest(BaseModel):
 
 
 class AssessRequest(BaseModel):
-    address: str
+    location: str
+    lat: float
+    lon: float
     annual_usage_kwh: float
-    system_size_kw: float
-    customer_type: str
     electricity_charge_incl_gst: float | None = None
     bill_period_usage_kwh: float | None = None
 
@@ -59,37 +58,38 @@ async def geocode_address(body: GeocodeRequest):
 @app.post("/assess")
 async def assess(body: AssessRequest):
     try:
-        geo = await geocode(body.address)
-
-        project = MicrogenerationProject(
-            location=geo["display_name"],
-            annual_usage_kwh=body.annual_usage_kwh,
-            system_size_kw=body.system_size_kw,
-            customer_type=body.customer_type,
-        )
-
+        usage_based_fallback_kw = estimate_target_system_size_kw(body.annual_usage_kwh)
         rate_per_kwh = effective_rate_per_kwh(
             body.electricity_charge_incl_gst, body.bill_period_usage_kwh
         )
 
-        weather, roof_solar_potential = await asyncio.gather(
-            fetch_weather(geo["lat"], geo["lon"], geo["display_name"]),
-            get_building_solar_summary(
-                geo["lat"], geo["lon"], body.system_size_kw, body.annual_usage_kwh, rate_per_kwh
-            ),
+        roof_solar_potential = await get_building_solar_summary(
+            body.lat, body.lon, body.annual_usage_kwh, rate_per_kwh
         )
 
-        advisor = ReadinessAdvisor()
-        result = advisor.assess(project, weather)
-        result["location"] = geo["display_name"]
-        result["coordinates"] = {"lat": geo["lat"], "lon": geo["lon"]}
+        if roof_solar_potential.get("available"):
+            effective_system_size_kw = roof_solar_potential["system_size_kw"]
+            system_size_basis = "roof_matched"
+        else:
+            effective_system_size_kw = usage_based_fallback_kw
+            system_size_basis = "usage_estimate"
+
+        project = MicrogenerationProject(
+            location=body.location,
+            annual_usage_kwh=body.annual_usage_kwh,
+            system_size_kw=effective_system_size_kw,
+        )
+
+        result = ReadinessAdvisor().assess(project)
+        result["location"] = body.location
+        result["coordinates"] = {"lat": body.lat, "lon": body.lon}
         result["roof_solar_potential"] = roof_solar_potential
+        result["recommended_system_size_kw"] = effective_system_size_kw
+        result["system_size_basis"] = system_size_basis
         return result
 
     except InvalidProjectInputError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail="Something went wrong on our end.")
 
