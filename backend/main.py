@@ -7,6 +7,7 @@ FastAPI backend — exposes three endpoints:
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from advisor import (
@@ -18,6 +19,7 @@ from advisor import (
 from weather import geocode
 from bill_extractor import extract_bill_usage, BillExtractionError
 from solar import get_building_solar_summary, effective_rate_per_kwh
+from roof_image import fetch_roof_image, RoofImageError
 
 MAX_BILL_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -35,6 +37,12 @@ class GeocodeRequest(BaseModel):
     address: str
 
 
+class MonthlyHistoryItem(BaseModel):
+    month: str
+    kwh: float | None = None
+    cost: float | None = None
+
+
 class AssessRequest(BaseModel):
     location: str
     lat: float
@@ -42,6 +50,7 @@ class AssessRequest(BaseModel):
     annual_usage_kwh: float
     electricity_charge_incl_gst: float | None = None
     bill_period_usage_kwh: float | None = None
+    monthly_usage_history: list[MonthlyHistoryItem] | None = None
 
 
 @app.post("/geocode")
@@ -63,8 +72,12 @@ async def assess(body: AssessRequest):
             body.electricity_charge_incl_gst, body.bill_period_usage_kwh
         )
 
+        monthly_usage_history = (
+            [item.model_dump() for item in body.monthly_usage_history]
+            if body.monthly_usage_history else None
+        )
         roof_solar_potential = await get_building_solar_summary(
-            body.lat, body.lon, body.annual_usage_kwh, rate_per_kwh
+            body.lat, body.lon, body.annual_usage_kwh, rate_per_kwh, monthly_usage_history
         )
 
         if roof_solar_potential.get("available"):
@@ -92,6 +105,15 @@ async def assess(body: AssessRequest):
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail="Something went wrong on our end.")
+
+
+@app.get("/roof-image")
+async def roof_image(lat: float, lon: float):
+    try:
+        image_bytes = await fetch_roof_image(lat, lon)
+    except RoofImageError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    return Response(content=image_bytes, media_type="image/png")
 
 
 @app.post("/extract-bill")

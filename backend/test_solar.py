@@ -11,7 +11,7 @@ from solar import (
     SolarApiNoCoverage,
     SolarApiNotConfigured,
     SolarApiRequestError,
-    build_assumptions,
+    azimuth_to_compass,
     build_comparison,
     classify_verdict,
     effective_rate_per_kwh,
@@ -19,7 +19,14 @@ from solar import (
     get_building_solar_summary,
     parse_solar_potential,
     size_to_max_roof_capacity,
+    summarize_roof_orientation,
 )
+
+MAX_CONFIG_ROOF_SEGMENT_SUMMARIES = [
+    {"pitchDegrees": 20, "azimuthDegrees": 180, "panelsCount": 14, "yearlyEnergyDcKwh": 6620.0, "segmentIndex": 0},
+    {"pitchDegrees": 20, "azimuthDegrees": 270, "panelsCount": 7, "yearlyEnergyDcKwh": 3200.0, "segmentIndex": 1},
+    {"pitchDegrees": 20, "azimuthDegrees": 90, "panelsCount": 3, "yearlyEnergyDcKwh": 1521.2, "segmentIndex": 2},
+]
 
 SAMPLE_BUILDING_INSIGHTS = {
     "imageryDate": {"year": 2022, "month": 8, "day": 1},
@@ -36,7 +43,11 @@ SAMPLE_BUILDING_INSIGHTS = {
             {"panelsCount": 10, "yearlyEnergyDcKwh": 4725.5},
             {"panelsCount": 16, "yearlyEnergyDcKwh": 7560.8},
             {"panelsCount": 20, "yearlyEnergyDcKwh": 9451.0},
-            {"panelsCount": 24, "yearlyEnergyDcKwh": 11341.2},
+            {
+                "panelsCount": 24,
+                "yearlyEnergyDcKwh": 11341.2,
+                "roofSegmentSummaries": MAX_CONFIG_ROOF_SEGMENT_SUMMARIES,
+            },
         ],
     },
 }
@@ -145,6 +156,70 @@ class TestSizeToMaxRoofCapacity(unittest.TestCase):
         })
         self.assertIsNone(size_to_max_roof_capacity(parsed))
 
+    def test_includes_max_configs_roof_segment_summaries(self):
+        sized = size_to_max_roof_capacity(self.parsed)
+        self.assertEqual(sized["roof_segment_summaries"], MAX_CONFIG_ROOF_SEGMENT_SUMMARIES)
+
+    def test_roof_segment_summaries_empty_when_absent(self):
+        parsed = parse_solar_potential({
+            "solarPotential": {
+                "panelCapacityWatts": 400,
+                "solarPanelConfigs": [{"panelsCount": 4, "yearlyEnergyDcKwh": 100}],
+            }
+        })
+        sized = size_to_max_roof_capacity(parsed)
+        self.assertEqual(sized["roof_segment_summaries"], [])
+
+
+class TestAzimuthToCompass(unittest.TestCase):
+    def test_north(self):
+        self.assertEqual(azimuth_to_compass(0), "N")
+
+    def test_east(self):
+        self.assertEqual(azimuth_to_compass(90), "E")
+
+    def test_south(self):
+        self.assertEqual(azimuth_to_compass(180), "S")
+
+    def test_west(self):
+        self.assertEqual(azimuth_to_compass(270), "W")
+
+    def test_northeast(self):
+        self.assertEqual(azimuth_to_compass(46), "NE")
+
+    def test_wraps_around_to_north(self):
+        self.assertEqual(azimuth_to_compass(360), "N")
+
+    def test_northwest(self):
+        self.assertEqual(azimuth_to_compass(320), "NW")
+
+    def test_just_below_360_wraps_to_north(self):
+        self.assertEqual(azimuth_to_compass(350), "N")
+
+
+class TestSummarizeRoofOrientation(unittest.TestCase):
+    def test_groups_and_scales_by_direction(self):
+        result = summarize_roof_orientation(MAX_CONFIG_ROOF_SEGMENT_SUMMARIES, wattage_ratio=1.1)
+        by_direction = {r["direction"]: r for r in result}
+
+        self.assertEqual(by_direction["S"]["panels_count"], 14)
+        self.assertEqual(by_direction["S"]["estimated_annual_production_kwh"], 7282.0)
+        self.assertEqual(by_direction["W"]["panels_count"], 7)
+        self.assertEqual(by_direction["W"]["estimated_annual_production_kwh"], 3520.0)
+        self.assertEqual(by_direction["E"]["panels_count"], 3)
+        self.assertEqual(by_direction["E"]["estimated_annual_production_kwh"], 1673.3)
+
+    def test_sorted_by_panels_count_descending(self):
+        result = summarize_roof_orientation(MAX_CONFIG_ROOF_SEGMENT_SUMMARIES, wattage_ratio=1.0)
+        self.assertEqual([r["direction"] for r in result], ["S", "W", "E"])
+
+    def test_empty_input_returns_empty_list(self):
+        self.assertEqual(summarize_roof_orientation([], wattage_ratio=1.1), [])
+
+    def test_skips_segments_missing_panels_or_azimuth(self):
+        segments = [{"azimuthDegrees": 180, "yearlyEnergyDcKwh": 100}, {"panelsCount": 5, "yearlyEnergyDcKwh": 100}]
+        self.assertEqual(summarize_roof_orientation(segments, wattage_ratio=1.0), [])
+
 
 class TestClassifyVerdict(unittest.TestCase):
     def test_full_coverage_at_boundary(self):
@@ -167,19 +242,6 @@ class TestClassifyVerdict(unittest.TestCase):
 
     def test_unknown_when_offset_none(self):
         self.assertEqual(classify_verdict(None)["verdict"], "unknown")
-
-
-class TestBuildAssumptions(unittest.TestCase):
-    def test_returns_nonempty_list_of_strings(self):
-        assumptions = build_assumptions(440, 400)
-        self.assertGreater(len(assumptions), 0)
-        self.assertTrue(all(isinstance(a, str) for a in assumptions))
-
-    def test_mentions_leading_and_google_wattage_values(self):
-        assumptions = build_assumptions(440, 400)
-        joined = " ".join(assumptions)
-        self.assertIn("440", joined)
-        self.assertIn("400", joined)
 
 
 class TestBuildComparison(unittest.TestCase):
@@ -235,18 +297,75 @@ class TestFetchBuildingInsights(unittest.IsolatedAsyncioTestCase):
                 await fetch_building_insights(51.05, -114.07, api_key="test-key")
 
 
+FAKE_DAILY_IRRADIANCE = {
+    "20260601": 4.0,
+    "20260602": 4.0,
+    "20260701": 6.0,
+}
+
+
 class TestGetBuildingSolarSummary(unittest.IsolatedAsyncioTestCase):
     async def test_success_path(self):
-        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, annual_usage_kwh=9000, rate_per_kwh=0.15)
         self.assertTrue(summary["available"])
         self.assertEqual(summary["panels_count"], 24)
         self.assertEqual(summary["system_size_kw"], 10.56)
         self.assertEqual(summary["estimated_annual_production_kwh"], 12475.3)
         self.assertIn(summary["verdict"], {"full_coverage", "partial_coverage", "too_small"})
-        self.assertGreater(len(summary["assumptions"]), 0)
+        self.assertNotIn("assumptions", summary)
         self.assertIsNotNone(summary["disclaimer"])
         self.assertIsNotNone(summary["comparison"]["estimated_annual_savings_cad"])
+
+    async def test_roof_orientation_grouped_from_max_config(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+        directions = {r["direction"] for r in summary["roof_orientation"]}
+        self.assertEqual(directions, {"S", "W", "E"})
+
+    async def test_monthly_breakdown_distributed_by_real_irradiance(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+        months = [m["month"] for m in summary["monthly_breakdown"]]
+        self.assertEqual(months, ["2026-06", "2026-07"])
+        total = sum(m["estimated_production_kwh"] for m in summary["monthly_breakdown"])
+        self.assertAlmostEqual(total, summary["estimated_annual_production_kwh"], delta=0.5)
+
+    async def test_monthly_breakdown_joins_bill_usage_history_by_month(self):
+        usage_history = [{"month": "2026-06", "kwh": 900.0, "cost": 150.0}]
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(
+                51.05, -114.07, 9000, monthly_usage_history=usage_history
+            )
+        by_month = {m["month"]: m for m in summary["monthly_breakdown"]}
+        self.assertEqual(by_month["2026-06"]["actual_usage_kwh"], 900.0)
+        self.assertEqual(by_month["2026-06"]["actual_cost_cad"], 150.0)
+        self.assertIsNone(by_month["2026-07"]["actual_usage_kwh"])
+
+    async def test_monthly_breakdown_includes_production_value_when_rate_known(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000, rate_per_kwh=0.15)
+        by_month = {m["month"]: m for m in summary["monthly_breakdown"]}
+        june = by_month["2026-06"]
+        self.assertEqual(june["estimated_production_value_cad"], round(june["estimated_production_kwh"] * 0.15, 2))
+
+    async def test_monthly_breakdown_production_value_none_without_rate(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+        self.assertTrue(all(m["estimated_production_value_cad"] is None for m in summary["monthly_breakdown"]))
+
+    async def test_monthly_breakdown_empty_when_irradiance_fetch_fails(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(side_effect=RuntimeError("boom"))):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+        self.assertTrue(summary["available"])
+        self.assertEqual(summary["monthly_breakdown"], [])
 
     async def test_no_coverage_degrades_gracefully(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNoCoverage("nope"))):

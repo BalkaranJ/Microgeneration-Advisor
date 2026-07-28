@@ -15,6 +15,14 @@ export default function Results({ results, onReset }) {
       <motion.div className="card" {...fadeUp(0)}>
         <p className="location-label">Location confirmed</p>
         <p className="location-name">{results.location}</p>
+        {results.coordinates && (
+          <img
+            src={`http://localhost:8000/roof-image?lat=${results.coordinates.lat}&lon=${results.coordinates.lon}`}
+            alt="Satellite view of the property"
+            className="location-image"
+            onError={e => { e.target.style.display = 'none' }}
+          />
+        )}
         <div className="tag-row">
           <span className="classification-tag">{results.classification}</span>
           <span className="classification-tag">
