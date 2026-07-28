@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import BillUpload from './BillUpload'
 
 export default function Step({ step, onAnswer, error }) {
   const [value, setValue] = useState('')
@@ -20,7 +21,9 @@ export default function Step({ step, onAnswer, error }) {
       <p className="step-question">{step.question}</p>
       {step.hint && <p className="step-hint">{step.hint}</p>}
 
-      {step.type === 'choice' ? (
+      {step.type === 'bill-upload' ? (
+        <BillUpload onAnswer={onAnswer} error={error} />
+      ) : step.type === 'choice' ? (
         <div className="choices">
           {step.choices.map(choice => (
             <button
