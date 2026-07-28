@@ -31,7 +31,6 @@ class GeocodeRequest(BaseModel):
 
 class AssessRequest(BaseModel):
     address: str
-    technology_type: str
     annual_usage_kwh: float
     system_size_kw: float
     customer_type: str
@@ -56,7 +55,6 @@ async def assess(body: AssessRequest):
 
         project = MicrogenerationProject(
             location=geo["display_name"],
-            technology_type=body.technology_type,
             annual_usage_kwh=body.annual_usage_kwh,
             system_size_kw=body.system_size_kw,
             customer_type=body.customer_type,
