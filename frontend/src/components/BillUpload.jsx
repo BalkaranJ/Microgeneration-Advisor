@@ -63,6 +63,7 @@ export default function BillUpload({ onAnswer, error: submitError }) {
         ? {
             electricity_charge_incl_gst: result.electricity_charge_incl_gst,
             bill_period_usage_kwh: result.usage_kwh,
+            monthly_history: result.monthly_history ?? [],
           }
         : undefined
     )

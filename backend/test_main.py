@@ -44,7 +44,21 @@ AVAILABLE_ROOF_SOLAR = {
     },
     "verdict": "full_coverage",
     "verdict_message": "This roof can cover your entire annual usage, with credit to spare.",
-    "assumptions": ["Sized to this roof's maximum buildable panel count from Google Solar imagery."],
+    "roof_orientation": [
+        {"direction": "S", "panels_count": 14, "estimated_annual_production_kwh": 7282.0},
+        {"direction": "W", "panels_count": 7, "estimated_annual_production_kwh": 3520.0},
+        {"direction": "E", "panels_count": 3, "estimated_annual_production_kwh": 1673.3},
+    ],
+    "monthly_breakdown": [
+        {
+            "month": "2026-06", "estimated_production_kwh": 900.0, "estimated_production_value_cad": 135.0,
+            "actual_usage_kwh": 900.0, "actual_cost_cad": 150.0,
+        },
+        {
+            "month": "2026-07", "estimated_production_kwh": 600.0, "estimated_production_value_cad": 90.0,
+            "actual_usage_kwh": None, "actual_cost_cad": None,
+        },
+    ],
     "disclaimer": "This is a pre-application estimate only, not an engineered solar proposal.",
 }
 
@@ -114,6 +128,48 @@ class TestAssessEndpoint(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         mock_get_solar.assert_not_called()
+
+    @patch("main.get_building_solar_summary", new_callable=AsyncMock)
+    def test_monthly_usage_history_passes_through_as_dicts(self, mock_get_solar):
+        mock_get_solar.return_value = AVAILABLE_ROOF_SOLAR
+
+        body = {**ASSESS_BODY, "monthly_usage_history": [{"month": "2026-06", "kwh": 900.0, "cost": 150.0}]}
+        response = client.post("/assess", json=body)
+
+        self.assertEqual(response.status_code, 200)
+        called_args = mock_get_solar.call_args.args
+        self.assertEqual(called_args[4], [{"month": "2026-06", "kwh": 900.0, "cost": 150.0}])
+
+    @patch("main.get_building_solar_summary", new_callable=AsyncMock)
+    def test_no_monthly_usage_history_passes_none(self, mock_get_solar):
+        mock_get_solar.return_value = AVAILABLE_ROOF_SOLAR
+
+        response = client.post("/assess", json=ASSESS_BODY)
+
+        self.assertEqual(response.status_code, 200)
+        called_args = mock_get_solar.call_args.args
+        self.assertIsNone(called_args[4])
+
+
+class TestRoofImageEndpoint(unittest.TestCase):
+    @patch("main.fetch_roof_image", new_callable=AsyncMock)
+    def test_success_returns_image_bytes(self, mock_fetch):
+        mock_fetch.return_value = b"\x89PNG\r\n"
+
+        response = client.get("/roof-image", params={"lat": 51.05, "lon": -114.07})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.content, b"\x89PNG\r\n")
+        self.assertEqual(response.headers["content-type"], "image/png")
+
+    @patch("main.fetch_roof_image", new_callable=AsyncMock)
+    def test_failure_returns_502(self, mock_fetch):
+        from roof_image import RoofImageError
+        mock_fetch.side_effect = RoofImageError("not configured")
+
+        response = client.get("/roof-image", params={"lat": 51.05, "lon": -114.07})
+
+        self.assertEqual(response.status_code, 502)
 
 
 if __name__ == "__main__":
