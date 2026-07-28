@@ -492,85 +492,23 @@ body::before {
   padding: 3px 10px;
 }
 
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.tag-row .classification-tag {
+  margin-top: 0;
+}
+
 .section-label {
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.07em;
   margin-bottom: 16px;
-}
-
-.scores-row {
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  margin-bottom: 18px;
-}
-
-/* score ring */
-.score-ring-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.score-ring {
-  position: relative;
-  width: 84px;
-  height: 84px;
-}
-
-.score-ring svg {
-  transform: rotate(-90deg);
-}
-
-.score-value {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  font-weight: 700;
-  color: #f1f5f9;
-}
-
-.score-label {
-  font-size: 12px;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.score-cards {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-
-.score-card {
-  border-radius: var(--radius-sm);
-  padding: 12px;
-  border: 1px solid;
-}
-
-.score-card.solar {
-  background: var(--amber-dim);
-  border-color: rgba(245,158,11,0.2);
-}
-
-.score-card-title {
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 5px;
-}
-
-.score-card.solar .score-card-title { color: var(--amber); }
-
-.score-card-reason {
-  font-size: 12px;
-  color: #94a3b8;
-  line-height: 1.5;
 }
 
 /* ─── Roof & Solar Potential ─────────────────────────── */
@@ -629,6 +567,12 @@ body::before {
   border: 1px solid rgba(245,158,11,0.2);
 }
 
+.offset-badge.offset-toosmall {
+  color: var(--red);
+  background: rgba(248,113,113,0.1);
+  border: 1px solid rgba(248,113,113,0.25);
+}
+
 .offset-detail {
   font-weight: 400;
   color: var(--text-muted);
@@ -653,23 +597,46 @@ body::before {
   line-height: 1.5;
 }
 
-.recommendation-card {
-  background: rgba(99,102,241,0.06);
-  border: 1px solid rgba(99,102,241,0.18);
-}
-
-.recommendation-label {
+.subsection-label {
   font-size: 11px;
   color: var(--indigo-light);
   text-transform: uppercase;
   letter-spacing: 0.07em;
+  margin-top: 6px;
   margin-bottom: 8px;
 }
 
-.recommendation-text {
+.disclaimer-text {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.vendors-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 24px 16px;
+  border: 1.5px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.vendors-placeholder-title {
   font-size: 13px;
+  font-weight: 600;
   color: #cbd5e1;
-  line-height: 1.6;
+}
+
+.vendors-placeholder-note {
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .checklist-item {

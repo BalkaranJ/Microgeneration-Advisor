@@ -1,11 +1,11 @@
 """
 Google Solar API integration — building/roof-level solar potential data.
 
-Best-effort and additive: get_building_solar_summary() never raises; any
-failure degrades to {"available": False, "reason": ..., "message": ...}
-so /assess can always return the existing weather-based results even when
-Google has no imagery for an address, the key isn't configured, or the
-request otherwise fails.
+Best-effort: get_building_solar_summary() never raises; any failure
+degrades to {"available": False, "reason": ..., "message": ...} so
+/assess can always fall back to a rough usage-based size estimate even
+when Google has no imagery for an address, the key isn't configured, or
+the request otherwise fails.
 """
 import os
 from typing import Optional
@@ -17,6 +17,18 @@ load_dotenv()
 
 SOLAR_API_URL = "https://solar.googleapis.com/v1/buildingInsights:findClosest"
 REQUEST_TIMEOUT = 15
+
+LEADING_PANEL_WATTS = 440          # current leading high-efficiency residential panel
+                                    # (vs. Google's own often-lower panelCapacityWatts, e.g. 400W observed live)
+OFFSET_FULL_COVERAGE_PCT = 100     # >= 100% -> "covers everything, credit to spare"
+OFFSET_PARTIAL_COVERAGE_PCT = 25   # >= 25% (and < 100%) -> "covers part"; below -> "too small to matter"
+
+DISCLAIMER_TEXT = (
+    "This is a pre-application estimate only, not an engineered solar proposal. "
+    "Actual production depends on the specific equipment installed, mounting angle, "
+    "real-world shading, and your utility's interconnection and rate terms — confirm "
+    "all of this with a qualified installer before proceeding."
+)
 
 
 class SolarApiError(Exception):
@@ -105,34 +117,65 @@ def parse_solar_potential(raw: dict) -> dict:
     }
 
 
-def select_closest_config(parsed: dict, system_size_kw: float) -> Optional[dict]:
+def size_to_max_roof_capacity(parsed: dict, leading_panel_watts: float = LEADING_PANEL_WATTS) -> Optional[dict]:
     """
-    solarPanelConfigs[] is Google's list of {panelsCount, yearlyEnergyDcKwh}
-    options, ascending by panel count. Convert the requested kW to a target
-    panel count via panelCapacityWatts and pick the config whose panel count
-    is closest to it. Returns None if there's no usable config/capacity data.
+    Sizes the system to this roof's maximum buildable panel count (the
+    largest panelsCount entry in solarPanelConfigs) using a disclosed
+    "leading panel wattage" assumption instead of Google's own (often
+    lower) panel_capacity_watts. Google's own location-specific
+    yearlyEnergyDcKwh for that max-panel config — already accounting for
+    this roof's shading/tilt/orientation — is kept and scaled by the
+    wattage ratio, rather than falling back to a flat kWh/kW/year rule
+    of thumb. Returns None if there's no usable config/capacity data.
     """
-    panel_capacity_watts = parsed.get("panel_capacity_watts")
+    google_panel_capacity_watts = parsed.get("panel_capacity_watts")
     configs = parsed.get("solar_panel_configs") or []
     valid = [
         c for c in configs
         if c.get("panelsCount") is not None and c.get("yearlyEnergyDcKwh") is not None
     ]
-    if not valid or not panel_capacity_watts:
+    if not valid or not google_panel_capacity_watts:
         return None
 
-    target_panels = (system_size_kw * 1000) / panel_capacity_watts
-    best = min(valid, key=lambda c: abs(c["panelsCount"] - target_panels))
-    max_available_panels = max(c["panelsCount"] for c in valid)
+    max_config = max(valid, key=lambda c: c["panelsCount"])
+    wattage_ratio = leading_panel_watts / google_panel_capacity_watts
 
     return {
-        "requested_system_size_kw": round(system_size_kw, 2),
-        "panel_capacity_watts": panel_capacity_watts,
-        "panels_count": best["panelsCount"],
-        "matched_system_size_kw": round(best["panelsCount"] * panel_capacity_watts / 1000, 2),
-        "estimated_annual_production_kwh": round(best["yearlyEnergyDcKwh"], 1),
-        "roof_capacity_exceeded": target_panels > max_available_panels,
+        "panels_count": max_config["panelsCount"],
+        "panel_watts_assumed": leading_panel_watts,
+        "google_panel_capacity_watts": google_panel_capacity_watts,
+        "system_size_kw": round(max_config["panelsCount"] * leading_panel_watts / 1000, 2),
+        "estimated_annual_production_kwh": round(max_config["yearlyEnergyDcKwh"] * wattage_ratio, 1),
     }
+
+
+def classify_verdict(offset_pct: Optional[float]) -> dict:
+    """Three-tier verdict on the roof-sized system's offset % of annual usage."""
+    if offset_pct is None:
+        return {"verdict": "unknown", "verdict_message": "Offset couldn't be calculated for this roof."}
+    if offset_pct >= OFFSET_FULL_COVERAGE_PCT:
+        return {
+            "verdict": "full_coverage",
+            "verdict_message": "This roof can cover your entire annual usage, with credit to spare.",
+        }
+    if offset_pct >= OFFSET_PARTIAL_COVERAGE_PCT:
+        return {"verdict": "partial_coverage", "verdict_message": "This roof can cover part of your annual bill."}
+    return {"verdict": "too_small", "verdict_message": "This roof is too small to make a real dent in your usage."}
+
+
+def build_assumptions(panel_watts_assumed: float, google_panel_capacity_watts: float) -> list:
+    return [
+        "Sized to this roof's maximum buildable panel count from Google Solar imagery — not a usage-targeted size.",
+        f"Assumes {panel_watts_assumed:.0f}W panels (a current leading high-efficiency residential panel), "
+        f"vs. Google's own {google_panel_capacity_watts:.0f}W modeling assumption for this roof — annual "
+        "production is scaled by that wattage ratio.",
+        "Annual production reuses Google Solar's shading/tilt/orientation-aware model for this roof's max-panel configuration.",
+        f"Verdict bands: {OFFSET_FULL_COVERAGE_PCT}%+ offset = full coverage, "
+        f"{OFFSET_PARTIAL_COVERAGE_PCT}-{OFFSET_FULL_COVERAGE_PCT - 1}% = partial, "
+        f"below {OFFSET_PARTIAL_COVERAGE_PCT}% = too small to matter.",
+        "Savings only credit energy generated and used on-site at your bill's effective rate; grid-exported "
+        "surplus isn't credited here.",
+    ]
 
 
 def build_comparison(
@@ -178,7 +221,6 @@ def build_comparison(
 async def get_building_solar_summary(
     lat: float,
     lon: float,
-    system_size_kw: float,
     annual_usage_kwh: float,
     rate_per_kwh: Optional[float] = None,
     api_key: Optional[str] = None,
@@ -211,28 +253,35 @@ async def get_building_solar_summary(
 
     try:
         parsed = parse_solar_potential(raw)
-        config = select_closest_config(parsed, system_size_kw)
-        if config is None:
+        sized = size_to_max_roof_capacity(parsed)
+        if sized is None:
             return {
                 "available": False,
                 "reason": "no_panel_data",
                 "message": "This roof doesn't have enough usable panel configuration data.",
             }
 
+        comparison = build_comparison(sized["estimated_annual_production_kwh"], annual_usage_kwh, rate_per_kwh)
+        verdict = classify_verdict(comparison["offset_pct"])
+
         return {
             "available": True,
             "reason": None,
             "imagery_quality": parsed["imagery_quality"],
             "imagery_date": parsed["imagery_date"],
-            "max_array_panels_count": parsed["max_array_panels_count"],
-            "max_array_area_m2": parsed["max_array_area_m2"],
-            "max_sunshine_hours_per_year": parsed["max_sunshine_hours_per_year"],
             "whole_roof_area_m2": parsed["whole_roof_area_m2"],
+            "max_sunshine_hours_per_year": parsed["max_sunshine_hours_per_year"],
             "carbon_offset_factor_kg_per_mwh": parsed["carbon_offset_factor_kg_per_mwh"],
-            "matched_config": config,
-            "comparison": build_comparison(
-                config["estimated_annual_production_kwh"], annual_usage_kwh, rate_per_kwh
-            ),
+            "panels_count": sized["panels_count"],
+            "panel_watts_assumed": sized["panel_watts_assumed"],
+            "google_panel_capacity_watts": sized["google_panel_capacity_watts"],
+            "system_size_kw": sized["system_size_kw"],
+            "estimated_annual_production_kwh": sized["estimated_annual_production_kwh"],
+            "comparison": comparison,
+            "verdict": verdict["verdict"],
+            "verdict_message": verdict["verdict_message"],
+            "assumptions": build_assumptions(sized["panel_watts_assumed"], sized["google_panel_capacity_watts"]),
+            "disclaimer": DISCLAIMER_TEXT,
         }
     except Exception:
         return {

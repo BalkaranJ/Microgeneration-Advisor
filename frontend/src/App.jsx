@@ -9,7 +9,7 @@ const STEPS = [
     id: 'address',
     question: "Where is your property?",
     hint: "Street address, city, or neighbourhood — anywhere in Canada",
-    type: 'text',
+    type: 'address-confirm',
     placeholder: 'e.g. 123 Main St, Calgary, AB',
   },
   {
@@ -18,25 +18,6 @@ const STEPS = [
     hint: "Upload a photo of your Enmax, Atco, or Epcor bill and we'll read it for you",
     type: 'bill-upload',
     unit: 'kWh',
-  },
-  {
-    id: 'system_size_kw',
-    question: "What size system are you thinking about?",
-    hint: "A typical home solar setup is 5–10 kW",
-    type: 'number',
-    placeholder: '8',
-    unit: 'kW',
-  },
-  {
-    id: 'customer_type',
-    question: "What best describes you?",
-    type: 'choice',
-    choices: [
-      { label: 'Residential', value: 'Residential', icon: '🏠' },
-      { label: 'Farm',        value: 'Farm',        icon: '🌾' },
-      { label: 'Business',    value: 'Business',    icon: '🏢' },
-      { label: 'Municipality',value: 'Municipality',icon: '🏛️' },
-    ],
   },
 ]
 
@@ -61,7 +42,11 @@ export default function App() {
   const activeStep     = STEPS[currentStep]
 
   async function handleAnswer(value, meta) {
-    const newAnswers = { ...answers, [activeStep.id]: value, ...(meta ? { billMeta: meta } : {}) }
+    const newAnswers = {
+      ...answers,
+      [activeStep.id]: value,
+      ...(meta ? { [`${activeStep.id}_meta`]: meta } : {}),
+    }
     setAnswers(newAnswers)
     setError(null)
 
@@ -70,16 +55,19 @@ export default function App() {
     } else {
       setLoading(true)
       try {
+        const addressMeta = newAnswers.address_meta
+        const billMeta     = newAnswers.annual_usage_kwh_meta
+
         const res = await fetch('http://localhost:8000/assess', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            address:                      newAnswers.address,
+            location:                     addressMeta.location,
+            lat:                          addressMeta.lat,
+            lon:                          addressMeta.lon,
             annual_usage_kwh:             parseFloat(newAnswers.annual_usage_kwh),
-            system_size_kw:               parseFloat(newAnswers.system_size_kw),
-            customer_type:                newAnswers.customer_type,
-            electricity_charge_incl_gst:  newAnswers.billMeta?.electricity_charge_incl_gst ?? null,
-            bill_period_usage_kwh:        newAnswers.billMeta?.bill_period_usage_kwh ?? null,
+            electricity_charge_incl_gst:  billMeta?.electricity_charge_incl_gst ?? null,
+            bill_period_usage_kwh:        billMeta?.bill_period_usage_kwh ?? null,
           }),
         })
         const data = await res.json()
@@ -141,7 +129,7 @@ export default function App() {
             animate={{ opacity: 1, scale: 1 }}
           >
             <span className="spin">⚙️</span>
-            <span>Pulling real weather data for your location...</span>
+            <span>Pulling weather data and estimating your ideal system size...</span>
           </motion.div>
         )}
 
