@@ -19,6 +19,7 @@
   --amber-dim:    rgba(245, 158, 11, 0.1);
   --green:        #34d399;
   --red:          #f87171;
+  --orange:       #d95926;
   --radius:       16px;
   --radius-sm:    10px;
   --blur:         blur(16px);
@@ -481,6 +482,16 @@ body::before {
   line-height: 1.4;
 }
 
+.location-image {
+  display: block;
+  width: 100%;
+  max-height: 200px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  margin-top: 10px;
+}
+
 .classification-tag {
   display: inline-block;
   margin-top: 6px;
@@ -511,7 +522,7 @@ body::before {
   margin-bottom: 16px;
 }
 
-/* ─── Roof & Solar Potential ─────────────────────────── */
+/* ─── Analysis Report ─────────────────────────── */
 
 .roof-source-note {
   font-size: 12px;
@@ -613,6 +624,95 @@ body::before {
   margin-top: 14px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+}
+
+/* ─── Roof orientation ────────────────────────────── */
+
+.orientation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.orientation-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+}
+
+.orientation-direction {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.orientation-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ─── Monthly production vs. usage chart ──────────── */
+
+.monthly-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.monthly-chart-legend {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.legend-swatch-a { background: var(--indigo); }
+.legend-swatch-b { background: var(--orange); }
+
+.monthly-chart-scroll {
+  overflow-x: auto;
+  margin-bottom: 4px;
+}
+
+.monthly-chart-svg {
+  display: block;
+}
+
+.monthly-chart-baseline {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.monthly-chart-bar-a { fill: var(--indigo); }
+.monthly-chart-bar-b { fill: var(--orange); }
+
+.monthly-chart-tick {
+  font-size: 9px;
+  fill: var(--text-muted);
+  text-anchor: middle;
+  font-family: var(--font);
+}
+
+.monthly-history-row-4col {
+  grid-template-columns: 0.7fr 1fr 1fr 1fr;
 }
 
 .vendors-placeholder {

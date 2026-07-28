@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import ChecklistItem from './ChecklistItem'
+import MonthlyBreakdownChart from './MonthlyBreakdownChart'
 
 function StatTile({ value, label }) {
   return (
@@ -8,6 +8,11 @@ function StatTile({ value, label }) {
       <div className="roof-stat-label">{label}</div>
     </div>
   )
+}
+
+const DIRECTION_LABEL = {
+  N: 'North', NE: 'Northeast', E: 'East', SE: 'Southeast',
+  S: 'South', SW: 'Southwest', W: 'West', NW: 'Northwest',
 }
 
 const VERDICT_CLASS = {
@@ -22,7 +27,7 @@ export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystem
   if (!r.available) {
     return (
       <motion.div className="card roof-unavailable" {...fadeUp}>
-        <p className="section-label">Roof & Solar Potential</p>
+        <p className="section-label">Analysis Report</p>
         <p className="roof-unavailable-note">
           {r.message || "Roof-level detail isn't available for this address."}
         </p>
@@ -41,7 +46,7 @@ export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystem
 
   return (
     <motion.div className="card" {...fadeUp}>
-      <p className="section-label">Roof & Solar Potential</p>
+      <p className="section-label">Analysis Report</p>
       <p className="roof-source-note">
         Based on Google aerial imagery{r.imagery_date ? ` from ${r.imagery_date}` : ''}
       </p>
@@ -89,10 +94,32 @@ export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystem
         </p>
       )}
 
-      <p className="subsection-label">Assumptions</p>
-      {r.assumptions.map((text, i) => (
-        <ChecklistItem key={i} text={text} />
-      ))}
+      {r.roof_orientation?.length > 0 && (
+        <>
+          <p className="subsection-label">Panels by Roof Side</p>
+          <div className="orientation-list">
+            {r.roof_orientation.map(o => (
+              <div key={o.direction} className="orientation-row">
+                <span className="orientation-direction">{DIRECTION_LABEL[o.direction] || o.direction}</span>
+                <span className="orientation-detail">
+                  {o.panels_count} panels · ~{Math.round(o.estimated_annual_production_kwh).toLocaleString()} kWh/yr
+                </span>
+              </div>
+            ))}
+          </div>
+          <p className="savings-note-text">
+            A real installer often only builds on the best-facing side(s) of a roof, not every facet —
+            which is why a live quote can come in well under the whole-roof max shown above.
+          </p>
+        </>
+      )}
+
+      {r.monthly_breakdown?.length > 0 && (
+        <>
+          <p className="subsection-label">Monthly Production vs. Usage</p>
+          <MonthlyBreakdownChart months={r.monthly_breakdown} />
+        </>
+      )}
 
       <p className="disclaimer-text">{r.disclaimer}</p>
     </motion.div>

@@ -68,6 +68,7 @@ export default function App() {
             annual_usage_kwh:             parseFloat(newAnswers.annual_usage_kwh),
             electricity_charge_incl_gst:  billMeta?.electricity_charge_incl_gst ?? null,
             bill_period_usage_kwh:        billMeta?.bill_period_usage_kwh ?? null,
+            monthly_usage_history:        billMeta?.monthly_history ?? null,
           }),
         })
         const data = await res.json()
