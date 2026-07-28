@@ -21,7 +21,7 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # Phase3/scripts up to the repo root
 PY="${PYTHON:-python}"                            # allow override with the PYTHON env var
-TEST_FILE="test_advisor.py"
+TEST_FILE="test_advisor.py test_solar.py test_main.py"
 LOG="$SCRIPT_DIR/last_test_run.log"
 
 echo "Project root is $PROJECT_ROOT/backend"
