@@ -23,7 +23,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$PROJECT_ROOT" || { echo "Cannot enter the project root"; exit 1; }
 
 # The files we care about, held in a space separated variable used by the loops.
-PY_FILES="app.py test_app.py backend/advisor.py backend/weather.py backend/main.py"
+PY_FILES="backend/advisor.py backend/weather.py backend/main.py backend/test_advisor.py"
 
 # Regex variables. The def pattern also matches async def so FastAPI endpoints count.
 CLASS_RE="^[[:space:]]*class "

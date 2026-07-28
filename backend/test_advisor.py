@@ -1,10 +1,10 @@
 """
-Unit tests for Microgeneration Readiness Advisor
-Covers all 8 planned test cases from Phase 2 Part D.
+Unit tests for the FastAPI backend's scoring logic (advisor.py).
+Ported from the original Phase 2 Streamlit prototype's test suite.
 """
 
 import unittest
-from app import (
+from advisor import (
     MicrogenerationProject,
     WeatherProfile,
     SolarSuitabilityScorer,
@@ -18,13 +18,13 @@ class TestValidProjectInput(unittest.TestCase):
 
     def test_valid_input_creates_project(self):
         project = MicrogenerationProject(
-            location="Calgary",
+            location="Calgary, Alberta, Canada",
             technology_type="solar",
             annual_usage_kwh=9000,
             system_size_kw=8.0,
             customer_type="Residential",
         )
-        self.assertEqual(project.get_location(), "Calgary")
+        self.assertEqual(project.get_location(), "Calgary, Alberta, Canada")
         self.assertEqual(project.get_technology_type(), "solar")
         self.assertEqual(project.get_annual_usage(), 9000)
         self.assertEqual(project.get_system_size(), 8.0)
@@ -37,7 +37,7 @@ class TestInvalidSystemSize(unittest.TestCase):
     def test_zero_system_size_raises_error(self):
         with self.assertRaises(InvalidProjectInputError):
             MicrogenerationProject(
-                location="Calgary",
+                location="Calgary, Alberta, Canada",
                 technology_type="solar",
                 annual_usage_kwh=9000,
                 system_size_kw=0,
@@ -47,7 +47,7 @@ class TestInvalidSystemSize(unittest.TestCase):
     def test_negative_system_size_raises_error(self):
         with self.assertRaises(InvalidProjectInputError):
             MicrogenerationProject(
-                location="Calgary",
+                location="Calgary, Alberta, Canada",
                 technology_type="solar",
                 annual_usage_kwh=9000,
                 system_size_kw=-5,
@@ -61,7 +61,7 @@ class TestInvalidAnnualUsage(unittest.TestCase):
     def test_zero_annual_usage_raises_error(self):
         with self.assertRaises(InvalidProjectInputError):
             MicrogenerationProject(
-                location="Calgary",
+                location="Calgary, Alberta, Canada",
                 technology_type="solar",
                 annual_usage_kwh=0,
                 system_size_kw=8.0,
@@ -71,7 +71,7 @@ class TestInvalidAnnualUsage(unittest.TestCase):
     def test_negative_annual_usage_raises_error(self):
         with self.assertRaises(InvalidProjectInputError):
             MicrogenerationProject(
-                location="Calgary",
+                location="Calgary, Alberta, Canada",
                 technology_type="solar",
                 annual_usage_kwh=-100,
                 system_size_kw=8.0,
@@ -80,22 +80,12 @@ class TestInvalidAnnualUsage(unittest.TestCase):
 
 
 class TestMissingLocation(unittest.TestCase):
-    """Test Case 4: Blank or unknown location raises InvalidProjectInputError."""
+    """Test Case 4: Blank location raises InvalidProjectInputError."""
 
     def test_empty_location_raises_error(self):
         with self.assertRaises(InvalidProjectInputError):
             MicrogenerationProject(
                 location="",
-                technology_type="solar",
-                annual_usage_kwh=9000,
-                system_size_kw=8.0,
-                customer_type="Residential",
-            )
-
-    def test_unknown_location_raises_error(self):
-        with self.assertRaises(InvalidProjectInputError):
-            MicrogenerationProject(
-                location="Atlantis",
                 technology_type="solar",
                 annual_usage_kwh=9000,
                 system_size_kw=8.0,

@@ -21,14 +21,14 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"   # Phase3/scripts up to the repo root
 PY="${PYTHON:-python}"                            # allow override with the PYTHON env var
-TEST_FILE="test_app.py"
+TEST_FILE="test_advisor.py"
 LOG="$SCRIPT_DIR/last_test_run.log"
 
-echo "Project root is $PROJECT_ROOT"
+echo "Project root is $PROJECT_ROOT/backend"
 echo "Running $TEST_FILE with $PY"
 echo
 
-cd "$PROJECT_ROOT" || { echo "Cannot enter the project root"; exit 1; }
+cd "$PROJECT_ROOT/backend" || { echo "Cannot enter the backend directory"; exit 1; }
 
 # Run the suite once. 2>&1 folds warnings into the same stream so grep sees everything,
 # and tee keeps a full log while still showing output live.
