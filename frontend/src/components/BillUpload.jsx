@@ -57,7 +57,15 @@ export default function BillUpload({ onAnswer, error: submitError }) {
   function handleConfirm(e) {
     e.preventDefault()
     if (!value.toString().trim()) return
-    onAnswer(value.toString().trim())
+    onAnswer(
+      value.toString().trim(),
+      result
+        ? {
+            electricity_charge_incl_gst: result.electricity_charge_incl_gst,
+            bill_period_usage_kwh: result.usage_kwh,
+          }
+        : undefined
+    )
   }
 
   function resetToUpload() {

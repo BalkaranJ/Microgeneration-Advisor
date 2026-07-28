@@ -5,6 +5,8 @@ FastAPI backend — exposes three endpoints:
   POST /extract-bill   utility bill photo -> extracted usage data
 """
 
+import asyncio
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -16,6 +18,7 @@ from advisor import (
 )
 from weather import geocode, fetch_weather
 from bill_extractor import extract_bill_usage, BillExtractionError
+from solar import get_building_solar_summary, effective_rate_per_kwh
 
 MAX_BILL_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -38,6 +41,8 @@ class AssessRequest(BaseModel):
     annual_usage_kwh: float
     system_size_kw: float
     customer_type: str
+    electricity_charge_incl_gst: float | None = None
+    bill_period_usage_kwh: float | None = None
 
 
 @app.post("/geocode")
@@ -55,7 +60,6 @@ async def geocode_address(body: GeocodeRequest):
 async def assess(body: AssessRequest):
     try:
         geo = await geocode(body.address)
-        weather = await fetch_weather(geo["lat"], geo["lon"], geo["display_name"])
 
         project = MicrogenerationProject(
             location=geo["display_name"],
@@ -64,10 +68,22 @@ async def assess(body: AssessRequest):
             customer_type=body.customer_type,
         )
 
+        rate_per_kwh = effective_rate_per_kwh(
+            body.electricity_charge_incl_gst, body.bill_period_usage_kwh
+        )
+
+        weather, roof_solar_potential = await asyncio.gather(
+            fetch_weather(geo["lat"], geo["lon"], geo["display_name"]),
+            get_building_solar_summary(
+                geo["lat"], geo["lon"], body.system_size_kw, body.annual_usage_kwh, rate_per_kwh
+            ),
+        )
+
         advisor = ReadinessAdvisor()
         result = advisor.assess(project, weather)
         result["location"] = geo["display_name"]
         result["coordinates"] = {"lat": geo["lat"], "lon": geo["lon"]}
+        result["roof_solar_potential"] = roof_solar_potential
         return result
 
     except InvalidProjectInputError as e:
