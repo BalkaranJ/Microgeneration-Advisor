@@ -1,5 +1,6 @@
 """
 Core scoring logic — same OOP design as the MVP, decoupled from Streamlit.
+Solar-only: wind scoring was removed when the product pivoted to solar.
 """
 
 from abc import ABC, abstractmethod
@@ -19,10 +20,8 @@ def rating_label(score):
 
 
 class MicrogenerationProject:
-    def __init__(self, location, technology_type, annual_usage_kwh,
-                 system_size_kw, customer_type):
+    def __init__(self, location, annual_usage_kwh, system_size_kw, customer_type):
         self._location = location
-        self._technology_type = technology_type
         self._annual_usage_kwh = annual_usage_kwh
         self._system_size_kw = system_size_kw
         self._customer_type = customer_type
@@ -37,25 +36,19 @@ class MicrogenerationProject:
             raise InvalidProjectInputError("Proposed system size must be greater than zero.")
 
     def get_location(self):      return self._location
-    def get_technology_type(self): return self._technology_type
     def get_annual_usage(self):  return self._annual_usage_kwh
     def get_system_size(self):   return self._system_size_kw
     def get_customer_type(self): return self._customer_type
 
 
 class WeatherProfile:
-    def __init__(self, location, solar_indicator, wind_indicator,
-                 cloud_cover, wind_consistency):
+    def __init__(self, location, solar_indicator, cloud_cover):
         self._location = location
         self._solar_indicator = solar_indicator
-        self._wind_indicator = wind_indicator
         self._cloud_cover = cloud_cover
-        self._wind_consistency = wind_consistency
 
-    def get_solar_indicator(self):  return self._solar_indicator
-    def get_wind_indicator(self):   return self._wind_indicator
-    def get_cloud_cover(self):      return self._cloud_cover
-    def get_wind_consistency(self): return self._wind_consistency
+    def get_solar_indicator(self): return self._solar_indicator
+    def get_cloud_cover(self):     return self._cloud_cover
 
 
 class SuitabilityScorer(ABC):
@@ -85,21 +78,6 @@ class SolarSuitabilityScorer(SuitabilityScorer):
         return "Solar conditions appear weak for this location."
 
 
-class WindSuitabilityScorer(SuitabilityScorer):
-    def calculate_score(self, weather_profile):
-        score = (weather_profile.get_wind_indicator() * 0.7
-                 + weather_profile.get_wind_consistency() * 0.3)
-        return self._clamp(score)
-
-    def generate_reason(self, score):
-        rating = rating_label(score)
-        if rating == "Strong":
-            return "Wind conditions appear strong for this location."
-        elif rating == "Moderate":
-            return "Wind conditions appear moderate for this location."
-        return "Wind conditions appear weak for this location."
-
-
 class ProjectClassifier:
     def classify(self, project):
         size = project.get_system_size()
@@ -115,62 +93,33 @@ class ProjectClassifier:
             return category
         size_word = category.split()[0]
         customer = project.get_customer_type().lower()
-        tech_words = {"solar": "solar", "wind": "wind", "compare": "solar and wind"}
-        tech = tech_words.get(project.get_technology_type(), "")
-        return "%s %s %s microgeneration concept" % (size_word, customer, tech)
+        return "%s %s solar microgeneration concept" % (size_word, customer)
 
 
 class ReadinessAdvisor:
     def __init__(self):
-        self._scorers = {
-            "solar": SolarSuitabilityScorer(),
-            "wind":  WindSuitabilityScorer(),
-        }
+        self._scorer = SolarSuitabilityScorer()
         self._classifier = ProjectClassifier()
 
     def assess(self, project, weather):
-        scores = {}
-        for name, scorer in self._scorers.items():
-            value = scorer.calculate_score(weather)
-            scores[name] = {
-                "score":  round(value, 1),
-                "rating": rating_label(value),
-                "reason": scorer.generate_reason(value),
-            }
+        value = self._scorer.calculate_score(weather)
+        solar = {
+            "score":  round(value, 1),
+            "rating": rating_label(value),
+            "reason": self._scorer.generate_reason(value),
+        }
         return {
             "classification":  self._classifier.describe(project),
             "size_category":   self._classifier.classify(project),
-            "solar":           scores["solar"],
-            "wind":            scores["wind"],
-            "recommendation":  self._build_recommendation(project, scores),
+            "solar":           solar,
+            "recommendation":  self._build_recommendation(solar),
             "checklist":       self._build_checklist(),
         }
 
-    def _build_recommendation(self, project, scores):
-        tech  = project.get_technology_type()
-        solar = scores["solar"]
-        wind  = scores["wind"]
-        if tech == "solar":
-            return ("For a solar project, this location scores %s/100 (%s). %s "
-                    "Consider reviewing the readiness checklist before going further."
-                    % (solar["score"], solar["rating"].lower(), solar["reason"]))
-        if tech == "wind":
-            return ("For a wind project, this location scores %s/100 (%s). %s "
-                    "Consider reviewing the readiness checklist before going further."
-                    % (wind["score"], wind["rating"].lower(), wind["reason"]))
-        difference = solar["score"] - wind["score"]
-        if abs(difference) < 5:
-            lead = ("Solar and wind appear similarly suited at this location, "
-                    "so other factors (cost, space, equipment) may decide it.")
-        elif difference > 0:
-            lead = ("This location appears better suited for solar than wind, "
-                    "because solar conditions are stronger.")
-        else:
-            lead = ("This location appears better suited for wind than solar, "
-                    "because wind conditions are stronger.")
-        return ("%s Solar scores %s/100 (%s) and wind scores %s/100 (%s)."
-                % (lead, solar["score"], solar["rating"].lower(),
-                   wind["score"], wind["rating"].lower()))
+    def _build_recommendation(self, solar):
+        return ("For a solar project, this location scores %s/100 (%s). %s "
+                "Consider reviewing the readiness checklist before going further."
+                % (solar["score"], solar["rating"].lower(), solar["reason"]))
 
     def _build_checklist(self):
         return [
@@ -178,6 +127,6 @@ class ReadinessAdvisor:
             "Confirm proposed system size with a qualified installer",
             "Review utility interconnection requirements",
             "Confirm equipment and safety requirements",
-            "Confirm site details such as roof, land, shading, or turbine placement",
+            "Confirm site details such as roof orientation and shading",
             "Understand that this result is only a pre-application estimate",
         ]

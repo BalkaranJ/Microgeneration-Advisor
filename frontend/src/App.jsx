@@ -13,16 +13,6 @@ const STEPS = [
     placeholder: 'e.g. 123 Main St, Calgary, AB',
   },
   {
-    id: 'technology_type',
-    question: "What are you thinking about?",
-    type: 'choice',
-    choices: [
-      { label: 'Solar',        value: 'solar',   icon: '☀️' },
-      { label: 'Wind',         value: 'wind',    icon: '💨' },
-      { label: 'Compare both', value: 'compare', icon: '⚖️' },
-    ],
-  },
-  {
     id: 'annual_usage_kwh',
     question: "How much electricity do you use in a year?",
     hint: "Check your utility bill — or take a rough guess",
@@ -86,7 +76,6 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             address:          newAnswers.address,
-            technology_type:  newAnswers.technology_type,
             annual_usage_kwh: parseFloat(newAnswers.annual_usage_kwh),
             system_size_kw:   parseFloat(newAnswers.system_size_kw),
             customer_type:    newAnswers.customer_type,
@@ -121,7 +110,7 @@ export default function App() {
       >
         <span className="app-icon">⚡</span>
         <div className="app-title">Microgeneration Readiness Advisor</div>
-        <div className="app-subtitle">Alberta solar and wind, simplified</div>
+        <div className="app-subtitle">Alberta solar, simplified</div>
       </motion.header>
 
       <div className="feed">
