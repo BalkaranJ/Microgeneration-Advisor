@@ -15,9 +15,8 @@ const STEPS = [
   {
     id: 'annual_usage_kwh',
     question: "How much electricity do you use in a year?",
-    hint: "Check your utility bill — or take a rough guess",
-    type: 'number',
-    placeholder: '9000',
+    hint: "Upload a photo of your Enmax, Atco, or Epcor bill and we'll read it for you",
+    type: 'bill-upload',
     unit: 'kWh',
   },
   {

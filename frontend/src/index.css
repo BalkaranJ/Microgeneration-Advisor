@@ -254,6 +254,189 @@ body::before {
   color: var(--red);
 }
 
+/* ─── Bill upload ─────────────────────────────────── */
+
+.bill-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.upload-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 28px 16px;
+  border-radius: var(--radius-sm);
+  border: 1.5px dashed var(--border);
+  background: rgba(255,255,255,0.02);
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: center;
+}
+
+.upload-dropzone:hover {
+  border-color: var(--border-hover);
+  background: var(--indigo-dim);
+}
+
+.upload-icon {
+  font-size: 26px;
+  margin-bottom: 4px;
+}
+
+.upload-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--indigo-light);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  font-family: var(--font);
+  text-align: left;
+  align-self: flex-start;
+  transition: color 0.2s;
+}
+
+.link-btn:hover {
+  color: #f1f5f9;
+}
+
+.upload-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 20px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.upload-thumb {
+  max-width: 160px;
+  max-height: 160px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+
+.upload-file-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  font-size: 13px;
+  color: #cbd5e1;
+  max-width: 100%;
+}
+
+.upload-file-chip span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-review {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.review-note {
+  font-size: 13px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.review-note strong {
+  color: #f1f5f9;
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bill-details {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+}
+
+.bill-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: #cbd5e1;
+}
+
+.bill-detail-row span:last-child {
+  color: #f1f5f9;
+  font-weight: 500;
+}
+
+.monthly-history {
+  width: 100%;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.monthly-history summary {
+  cursor: pointer;
+  color: var(--indigo-light);
+  font-weight: 500;
+  padding: 2px 0;
+}
+
+.monthly-history summary:hover {
+  color: #f1f5f9;
+}
+
+.monthly-history-list {
+  margin-top: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.monthly-history-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  font-size: 12px;
+  color: #cbd5e1;
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+
+.monthly-history-row:nth-child(odd) {
+  background: rgba(255,255,255,0.02);
+}
+
 /* ─── Loading ─────────────────────────────────────── */
 
 .loading-card {
