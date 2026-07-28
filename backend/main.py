@@ -1,10 +1,11 @@
 """
-FastAPI backend — exposes two endpoints:
-  POST /geocode    address string -> lat/lon/display_name
-  POST /assess     full project inputs -> scored results
+FastAPI backend — exposes three endpoints:
+  POST /geocode        address string -> lat/lon/display_name
+  POST /assess         full project inputs -> scored results
+  POST /extract-bill   utility bill photo -> extracted usage data
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -14,6 +15,9 @@ from advisor import (
     InvalidProjectInputError,
 )
 from weather import geocode, fetch_weather
+from bill_extractor import extract_bill_usage, BillExtractionError
+
+MAX_BILL_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 app = FastAPI()
 
@@ -72,3 +76,15 @@ async def assess(body: AssessRequest):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail="Something went wrong on our end.")
+
+
+@app.post("/extract-bill")
+async def extract_bill(file: UploadFile = File(...)):
+    image_bytes = await file.read()
+    if len(image_bytes) > MAX_BILL_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image is too large. Please upload a photo under 10MB.")
+
+    try:
+        return extract_bill_usage(image_bytes, file.content_type)
+    except BillExtractionError as e:
+        raise HTTPException(status_code=422, detail=str(e))
