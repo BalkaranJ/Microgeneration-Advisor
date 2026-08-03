@@ -1,7 +1,6 @@
-const BAR_WIDTH = 14
-const BAR_GAP = 2       // surface gap between the two bars in a month's group
-const GROUP_GAP = 14
-const CHART_HEIGHT = 120
+const PLOT_H = 150
+const HEADROOM = 16
+const X_PAD = 20
 
 function formatMonth(monthStr) {
   const [year, month] = (monthStr || '').split('-')
@@ -14,67 +13,87 @@ function formatMoney(value) {
   return value != null ? `$${value.toFixed(2)}` : '—'
 }
 
-function niceMax(max) {
-  if (max <= 0) return 1
-  const magnitude = Math.pow(10, Math.floor(Math.log10(max)))
-  const normalized = max / magnitude
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+function niceStep(rough) {
+  if (rough <= 0) return 1
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rough)))
+  const normalized = rough / magnitude
+  const step = normalized < 1.5 ? 1 : normalized < 3.5 ? 2 : normalized < 7.5 ? 5 : 10
   return step * magnitude
 }
 
-function BarPairChart({ months, seriesA, seriesB, unit, formatValue }) {
-  const maxValue = niceMax(Math.max(1, ...months.flatMap(m => [seriesA.value(m) || 0, seriesB.value(m) || 0])))
-  const groupWidth = BAR_WIDTH * 2 + BAR_GAP
-  const width = months.length * groupWidth + Math.max(0, months.length - 1) * GROUP_GAP
-  const scale = v => (v / maxValue) * (CHART_HEIGHT - 20)
+function LineAreaChart({ months, seriesA, seriesB, formatValue, formatTick }) {
+  const rawMax = Math.max(1, ...months.flatMap(m => [seriesA.value(m) || 0, seriesB.value(m) || 0]))
+  const step = niceStep(rawMax / 3)
+  const top = step * 3
+  const width = 400
+  const xStep = months.length > 1 ? (width - X_PAD * 2) / (months.length - 1) : 0
+
+  const x = i => X_PAD + i * xStep
+  const y = v => PLOT_H - (v / top) * (PLOT_H - HEADROOM)
+
+  function buildSeries(series) {
+    const pts = months
+      .map((m, i) => ({ i, v: series.value(m) }))
+      .filter(p => p.v != null)
+    return pts.map(p => ({ x: x(p.i), y: y(p.v), v: p.v, month: months[p.i].month }))
+  }
+
+  const ptsA = buildSeries(seriesA)
+  const ptsB = buildSeries(seriesB)
+  const peak = ptsA.reduce((best, p) => (!best || p.v > best.v ? p : best), null)
+
+  const linePoints = pts => pts.map(p => `${p.x},${p.y}`).join(' ')
+  const areaPath = pts => {
+    if (!pts.length) return ''
+    const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ')
+    const last = pts[pts.length - 1]
+    const first = pts[0]
+    return `${line} L${last.x},${PLOT_H} L${first.x},${PLOT_H} Z`
+  }
+
+  const ticks = [0, step, step * 2, step * 3]
 
   return (
-    <div className="monthly-chart-scroll">
-      <svg
-        className="monthly-chart-svg"
-        width={width}
-        height={CHART_HEIGHT + 24}
-        viewBox={`0 0 ${width} ${CHART_HEIGHT + 24}`}
-        role="img"
-        aria-label={`Monthly ${unit} comparison: ${seriesA.label} vs ${seriesB.label}`}
-      >
-        <line
-          x1="0" y1={CHART_HEIGHT} x2={width} y2={CHART_HEIGHT}
-          className="monthly-chart-baseline"
-        />
-        {months.map((m, i) => {
-          const groupX = i * (groupWidth + GROUP_GAP)
-          const aValue = seriesA.value(m)
-          const bValue = seriesB.value(m)
-          const aHeight = aValue != null ? scale(aValue) : 0
-          const bHeight = bValue != null ? scale(bValue) : 0
-          return (
-            <g key={m.month}>
-              {aValue != null && (
-                <rect
-                  x={groupX} y={CHART_HEIGHT - aHeight}
-                  width={BAR_WIDTH} height={Math.max(aHeight, 1)}
-                  rx="4" className="monthly-chart-bar-a"
-                >
-                  <title>{`${formatMonth(m.month)}: ${seriesA.label} ${formatValue(aValue)}`}</title>
-                </rect>
-              )}
-              {bValue != null && (
-                <rect
-                  x={groupX + BAR_WIDTH + BAR_GAP} y={CHART_HEIGHT - bHeight}
-                  width={BAR_WIDTH} height={Math.max(bHeight, 1)}
-                  rx="4" className="monthly-chart-bar-b"
-                >
-                  <title>{`${formatMonth(m.month)}: ${seriesB.label} ${formatValue(bValue)}`}</title>
-                </rect>
-              )}
-              <text x={groupX + (BAR_WIDTH * 2 + BAR_GAP) / 2} y={CHART_HEIGHT + 16} className="monthly-chart-tick">
-                {formatMonth(m.month)}
+    <div className="chart-block">
+      <div className="plot">
+        <div className="plot-yaxis">
+          {ticks.map(t => (
+            <span key={t} style={{ top: `${y(t)}px` }}>{formatTick(t)}</span>
+          ))}
+        </div>
+        <div className="plot-area">
+          {ticks.map(t => (
+            <div key={t} className={`gridline${t === 0 ? ' baseline' : ''}`} style={{ top: `${y(t)}px` }} />
+          ))}
+          <svg viewBox={`0 0 ${width} ${PLOT_H}`} width="100%" height={PLOT_H} style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
+            <path d={areaPath(ptsA)} fill="var(--gold)" opacity="0.1" />
+            <polyline points={linePoints(ptsA)} fill="none" stroke="var(--gold)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            <polyline points={linePoints(ptsB)} fill="none" stroke="var(--sky)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+            {ptsA.map(p => (
+              <circle key={`a-${p.month}`} cx={p.x} cy={p.y} r="4" fill="var(--gold)" stroke="var(--surface)" strokeWidth="2">
+                <title>{`${formatMonth(p.month)}: ${seriesA.label} ${formatValue(p.v)}`}</title>
+              </circle>
+            ))}
+            {ptsB.map(p => (
+              <circle key={`b-${p.month}`} cx={p.x} cy={p.y} r="4" fill="var(--sky)" stroke="var(--surface)" strokeWidth="2">
+                <title>{`${formatMonth(p.month)}: ${seriesB.label} ${formatValue(p.v)}`}</title>
+              </circle>
+            ))}
+            {peak && (
+              <text x={peak.x} y={Math.max(9, peak.y - 8)} textAnchor="middle" fontSize="10" fontWeight="700" fill="var(--text)">
+                {formatValue(peak.v)}
               </text>
-            </g>
-          )
-        })}
-      </svg>
+            )}
+          </svg>
+        </div>
+      </div>
+      <div className="month-axis">
+        {months.map(m => <span key={m.month}>{formatMonth(m.month)}</span>)}
+      </div>
+      <div className="chart-legend">
+        <span className="key"><span className="swatch-line" style={{ background: 'var(--gold)' }} />{seriesA.label}</span>
+        <span className="key"><span className="swatch-line" style={{ background: 'var(--sky)' }} />{seriesB.label}</span>
+      </div>
     </div>
   )
 }
@@ -86,32 +105,22 @@ export default function MonthlyBreakdownChart({ months }) {
 
   return (
     <div className="monthly-chart">
-      <div className="monthly-chart-legend">
-        <span className="legend-item"><span className="legend-swatch legend-swatch-a" />Est. production</span>
-        <span className="legend-item"><span className="legend-swatch legend-swatch-b" />Your usage</span>
-      </div>
-      <BarPairChart
+      <LineAreaChart
         months={months}
         seriesA={{ label: 'Est. production', value: m => m.estimated_production_kwh }}
-        seriesB={{ label: 'Actual usage', value: m => m.actual_usage_kwh }}
-        unit="kWh"
+        seriesB={{ label: 'Your usage', value: m => m.actual_usage_kwh }}
         formatValue={v => `${Math.round(v).toLocaleString()} kWh`}
+        formatTick={v => v.toLocaleString()}
       />
 
       {hasCostData && (
-        <>
-          <div className="monthly-chart-legend">
-            <span className="legend-item"><span className="legend-swatch legend-swatch-a" />Value of production</span>
-            <span className="legend-item"><span className="legend-swatch legend-swatch-b" />Your bill</span>
-          </div>
-          <BarPairChart
-            months={months}
-            seriesA={{ label: 'Value of production', value: m => m.estimated_production_value_cad }}
-            seriesB={{ label: 'Actual bill', value: m => m.actual_cost_cad }}
-            unit="$"
-            formatValue={formatMoney}
-          />
-        </>
+        <LineAreaChart
+          months={months}
+          seriesA={{ label: 'Value of production', value: m => m.estimated_production_value_cad }}
+          seriesB={{ label: 'Your bill', value: m => m.actual_cost_cad }}
+          formatValue={formatMoney}
+          formatTick={v => `$${v.toLocaleString()}`}
+        />
       )}
 
       <details className="monthly-history">
