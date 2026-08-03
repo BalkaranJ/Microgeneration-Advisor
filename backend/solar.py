@@ -25,6 +25,23 @@ LEADING_PANEL_WATTS = 440          # current leading high-efficiency residential
 OFFSET_FULL_COVERAGE_PCT = 100     # >= 100% -> "covers everything, credit to spare"
 OFFSET_PARTIAL_COVERAGE_PCT = 25   # >= 25% (and < 100%) -> "covers part"; below -> "too small to matter"
 
+INSTALLED_COST_PER_WATT_CAD = 3.00   # rough turnkey residential installed cost per watt (CAD),
+                                      # before any grants/rebates — a round, disclosed planning-
+                                      # stage placeholder. Web-verified against current Alberta-
+                                      # specific solar-contractor pricing (2026): commonly cited
+                                      # ranges are $2.40-$3.01/W and $2.80-$3.40/W, with $2.50-
+                                      # $3.50/W cited as the general small-residential range —
+                                      # $3.00/W sits centrally in that band. Same spirit as
+                                      # LEADING_PANEL_WATTS above: a disclosed assumption, not a
+                                      # real quote. Sources: getenergy.ca/solar-panel-cost-alberta,
+                                      # fortmcmurraysolar.ca/blog/how-much-do-solar-panels-cost-in-alberta
+PANEL_LIFESPAN_YEARS = 25            # industry-standard manufacturer *performance* warranty term
+                                      # (distinct from the older, shorter product/workmanship
+                                      # warranty) — near-universal across Tier-1 panel makers per
+                                      # EnergySage/SolarReviews; used for lifetime savings/CO2
+                                      # figures. Sources: energysage.com/solar/solar-panel-warranties,
+                                      # solarreviews.com/blog/guide-to-solar-panel-warranties
+
 DISCLAIMER_TEXT = (
     "This is a pre-application estimate only, not an engineered solar proposal. "
     "Actual production depends on the specific equipment installed, mounting angle, "
@@ -119,6 +136,14 @@ def parse_solar_potential(raw: dict) -> dict:
     }
 
 
+def _valid_configs(configs: list) -> list:
+    """solarPanelConfigs entries usable for sizing (has panelsCount + yearlyEnergyDcKwh)."""
+    return [
+        c for c in configs
+        if c.get("panelsCount") is not None and c.get("yearlyEnergyDcKwh") is not None
+    ]
+
+
 def size_to_max_roof_capacity(parsed: dict, leading_panel_watts: float = LEADING_PANEL_WATTS) -> Optional[dict]:
     """
     Sizes the system to this roof's maximum buildable panel count (the
@@ -129,13 +154,13 @@ def size_to_max_roof_capacity(parsed: dict, leading_panel_watts: float = LEADING
     this roof's shading/tilt/orientation — is kept and scaled by the
     wattage ratio, rather than falling back to a flat kWh/kW/year rule
     of thumb. Returns None if there's no usable config/capacity data.
+
+    This is the whole-roof *ceiling*, kept for informational context — see
+    size_to_recommended_system() below for the usage-sized recommendation
+    that actually drives the headline report.
     """
     google_panel_capacity_watts = parsed.get("panel_capacity_watts")
-    configs = parsed.get("solar_panel_configs") or []
-    valid = [
-        c for c in configs
-        if c.get("panelsCount") is not None and c.get("yearlyEnergyDcKwh") is not None
-    ]
+    valid = _valid_configs(parsed.get("solar_panel_configs") or [])
     if not valid or not google_panel_capacity_watts:
         return None
 
@@ -149,6 +174,54 @@ def size_to_max_roof_capacity(parsed: dict, leading_panel_watts: float = LEADING
         "system_size_kw": round(max_config["panelsCount"] * leading_panel_watts / 1000, 2),
         "estimated_annual_production_kwh": round(max_config["yearlyEnergyDcKwh"] * wattage_ratio, 1),
         "roof_segment_summaries": max_config.get("roofSegmentSummaries") or [],
+    }
+
+
+def size_to_recommended_system(
+    parsed: dict,
+    annual_usage_kwh: float,
+    leading_panel_watts: float = LEADING_PANEL_WATTS,
+    target_offset_pct: float = OFFSET_FULL_COVERAGE_PCT,
+) -> Optional[dict]:
+    """
+    Sizes the system the way a real installer actually would: picks the
+    SMALLEST solarPanelConfigs entry (by panelsCount) whose wattage-rescaled
+    yearlyEnergyDcKwh reaches target_offset_pct of the customer's usage.
+    Google's solarPanelConfigs is a cumulative series ordered from the
+    roof's single best-yield spot upward, so this naturally prefers the
+    best-facing side(s) first instead of maxing out the whole roof like
+    size_to_max_roof_capacity() does. Configs are defensively re-sorted by
+    panelsCount rather than trusting Google's order. Falls back to the
+    single largest config (same tie-break as size_to_max_roof_capacity())
+    if even the whole roof can't reach the target — "target_met" flags
+    which happened. Returns None under the same conditions as
+    size_to_max_roof_capacity().
+    """
+    google_panel_capacity_watts = parsed.get("panel_capacity_watts")
+    valid = _valid_configs(parsed.get("solar_panel_configs") or [])
+    if not valid or not google_panel_capacity_watts:
+        return None
+
+    wattage_ratio = leading_panel_watts / google_panel_capacity_watts
+    target_kwh = annual_usage_kwh * (target_offset_pct / 100)
+
+    sorted_by_panels = sorted(valid, key=lambda c: c["panelsCount"])
+    chosen = next(
+        (c for c in sorted_by_panels if c["yearlyEnergyDcKwh"] * wattage_ratio >= target_kwh),
+        None,
+    )
+    target_met = chosen is not None
+    if chosen is None:
+        chosen = max(valid, key=lambda c: c["panelsCount"])
+
+    return {
+        "panels_count": chosen["panelsCount"],
+        "panel_watts_assumed": leading_panel_watts,
+        "google_panel_capacity_watts": google_panel_capacity_watts,
+        "system_size_kw": round(chosen["panelsCount"] * leading_panel_watts / 1000, 2),
+        "estimated_annual_production_kwh": round(chosen["yearlyEnergyDcKwh"] * wattage_ratio, 1),
+        "roof_segment_summaries": chosen.get("roofSegmentSummaries") or [],
+        "target_met": target_met,
     }
 
 
@@ -253,6 +326,71 @@ def build_comparison(
     return result
 
 
+def estimate_installed_cost_cad(
+    system_size_kw: float,
+    cost_per_watt_cad: float = INSTALLED_COST_PER_WATT_CAD,
+) -> float:
+    """Rough turnkey installed cost for a system of this size, before any grants/rebates."""
+    return round(system_size_kw * 1000 * cost_per_watt_cad, 2)
+
+
+def build_financials(
+    system_size_kw: float,
+    estimated_annual_savings_cad: Optional[float],
+    cost_per_watt_cad: float = INSTALLED_COST_PER_WATT_CAD,
+    lifespan_years: int = PANEL_LIFESPAN_YEARS,
+) -> dict:
+    """
+    Rough cost/payback/lifetime-savings figures for the recommended system.
+    Deliberately simple and undiscounted — no rate inflation, no panel
+    output degradation modeled — matching this app's existing flat/linear
+    approach (build_comparison(), _build_monthly_breakdown()). Payback and
+    lifetime savings are None when annual savings aren't known or are zero,
+    since cost / 0 is undefined.
+    """
+    cost = estimate_installed_cost_cad(system_size_kw, cost_per_watt_cad)
+
+    payback_period_years = None
+    lifetime_net_savings_cad = None
+    if estimated_annual_savings_cad:
+        payback_period_years = round(cost / estimated_annual_savings_cad, 1)
+        lifetime_net_savings_cad = round(estimated_annual_savings_cad * lifespan_years - cost, 2)
+
+    return {
+        "estimated_installed_cost_cad": cost,
+        "cost_per_watt_cad_assumed": cost_per_watt_cad,
+        "payback_period_years": payback_period_years,
+        "panel_lifespan_years": lifespan_years,
+        "lifetime_net_savings_cad": lifetime_net_savings_cad,
+        "note": (
+            "Rough planning-stage estimate only — excludes any government grants/rebates and "
+            "financing costs, and doesn't model panel output degradation or future utility rate "
+            "changes over the system's lifetime."
+        ),
+    }
+
+
+def build_carbon_offset(
+    estimated_annual_production_kwh: float,
+    carbon_offset_factor_kg_per_mwh: Optional[float],
+    lifespan_years: int = PANEL_LIFESPAN_YEARS,
+) -> Optional[dict]:
+    """
+    Converts annual production into an estimated CO2 offset using Google's
+    own location-specific grid carbon-intensity factor — never a generic
+    invented factor. Returns None if Google didn't return a factor for this
+    location (occasionally absent), so the frontend can just hide the section.
+    """
+    if carbon_offset_factor_kg_per_mwh is None:
+        return None
+    annual_co2_offset_kg = round((estimated_annual_production_kwh / 1000) * carbon_offset_factor_kg_per_mwh, 1)
+    return {
+        "carbon_offset_factor_kg_per_mwh": carbon_offset_factor_kg_per_mwh,
+        "annual_co2_offset_kg": annual_co2_offset_kg,
+        "lifetime_co2_offset_tonnes": round(annual_co2_offset_kg * lifespan_years / 1000, 2),
+    }
+
+
 async def _build_monthly_breakdown(
     lat: float,
     lon: float,
@@ -298,6 +436,7 @@ async def get_building_solar_summary(
     rate_per_kwh: Optional[float] = None,
     monthly_usage_history: Optional[list] = None,
     api_key: Optional[str] = None,
+    target_offset_pct: float = OFFSET_FULL_COVERAGE_PCT,
 ) -> dict:
     """
     Never raises. Returns the dict embedded as /assess's
@@ -327,20 +466,28 @@ async def get_building_solar_summary(
 
     try:
         parsed = parse_solar_potential(raw)
-        sized = size_to_max_roof_capacity(parsed)
-        if sized is None:
+        max_capacity = size_to_max_roof_capacity(parsed)
+        if max_capacity is None:
             return {
                 "available": False,
                 "reason": "no_panel_data",
                 "message": "This roof doesn't have enough usable panel configuration data.",
             }
 
-        comparison = build_comparison(sized["estimated_annual_production_kwh"], annual_usage_kwh, rate_per_kwh)
+        # Passes the same validity gate max_capacity just passed above
+        # (_valid_configs + panel_capacity_watts), so this can't be None here.
+        recommended = size_to_recommended_system(parsed, annual_usage_kwh, target_offset_pct=target_offset_pct)
+
+        comparison = build_comparison(recommended["estimated_annual_production_kwh"], annual_usage_kwh, rate_per_kwh)
         verdict = classify_verdict(comparison["offset_pct"])
-        wattage_ratio = sized["panel_watts_assumed"] / sized["google_panel_capacity_watts"]
-        roof_orientation = summarize_roof_orientation(sized["roof_segment_summaries"], wattage_ratio)
+        wattage_ratio = recommended["panel_watts_assumed"] / recommended["google_panel_capacity_watts"]
+        roof_orientation = summarize_roof_orientation(recommended["roof_segment_summaries"], wattage_ratio)
         monthly_breakdown = await _build_monthly_breakdown(
-            lat, lon, sized["estimated_annual_production_kwh"], monthly_usage_history, rate_per_kwh
+            lat, lon, recommended["estimated_annual_production_kwh"], monthly_usage_history, rate_per_kwh
+        )
+        financials = build_financials(recommended["system_size_kw"], comparison["estimated_annual_savings_cad"])
+        carbon_offset = build_carbon_offset(
+            recommended["estimated_annual_production_kwh"], parsed["carbon_offset_factor_kg_per_mwh"]
         )
 
         return {
@@ -351,16 +498,25 @@ async def get_building_solar_summary(
             "whole_roof_area_m2": parsed["whole_roof_area_m2"],
             "max_sunshine_hours_per_year": parsed["max_sunshine_hours_per_year"],
             "carbon_offset_factor_kg_per_mwh": parsed["carbon_offset_factor_kg_per_mwh"],
-            "panels_count": sized["panels_count"],
-            "panel_watts_assumed": sized["panel_watts_assumed"],
-            "google_panel_capacity_watts": sized["google_panel_capacity_watts"],
-            "system_size_kw": sized["system_size_kw"],
-            "estimated_annual_production_kwh": sized["estimated_annual_production_kwh"],
+            "panels_count": recommended["panels_count"],
+            "panel_watts_assumed": recommended["panel_watts_assumed"],
+            "google_panel_capacity_watts": recommended["google_panel_capacity_watts"],
+            "system_size_kw": recommended["system_size_kw"],
+            "estimated_annual_production_kwh": recommended["estimated_annual_production_kwh"],
+            "target_offset_pct": target_offset_pct,
+            "recommended_meets_target": recommended["target_met"],
+            "max_roof_capacity": {
+                "panels_count": max_capacity["panels_count"],
+                "system_size_kw": max_capacity["system_size_kw"],
+                "estimated_annual_production_kwh": max_capacity["estimated_annual_production_kwh"],
+            },
             "comparison": comparison,
             "verdict": verdict["verdict"],
             "verdict_message": verdict["verdict_message"],
             "roof_orientation": roof_orientation,
             "monthly_breakdown": monthly_breakdown,
+            "financials": financials,
+            "carbon_offset": carbon_offset,
             "disclaimer": DISCLAIMER_TEXT,
         }
     except Exception:
