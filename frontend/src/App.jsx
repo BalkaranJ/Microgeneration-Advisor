@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
 import Landing from './components/Landing'
+import Skyline from './components/Skyline'
 import Step from './components/Step'
 import Results from './components/Results'
 
@@ -85,45 +86,49 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <motion.header
-        className="app-header"
-        initial={{ opacity: 0, y: -16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <span className="app-icon">☀️</span>
-        <div className="app-title">SolarFit</div>
-        <div className="app-subtitle">Solar, simplified</div>
-      </motion.header>
+    <>
+      <Skyline />
 
-      <div className="feed">
-        {!results && !loading && activeStep && (
-          <Step
-            key={activeStep.id}
-            step={activeStep}
-            stepIndex={currentStep}
-            stepCount={STEPS.length}
-            onAnswer={handleAnswer}
-            error={error}
-          />
-        )}
+      <div className="app">
+        <motion.header
+          className="app-header"
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5 }}
+        >
+          <span className="app-icon">☀️</span>
+          <div className="app-title">SolarFit</div>
+          <div className="app-subtitle">Solar, simplified</div>
+        </motion.header>
 
-        {loading && (
-          <motion.div
-            className="card loading-card"
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-          >
-            <span className="spin">⚙️</span>
-            <span>Pulling weather data and estimating your ideal system size...</span>
-          </motion.div>
-        )}
+        <div className="feed">
+          {!results && !loading && activeStep && (
+            <Step
+              key={activeStep.id}
+              step={activeStep}
+              stepIndex={currentStep}
+              stepCount={STEPS.length}
+              onAnswer={handleAnswer}
+              error={error}
+            />
+          )}
 
-        {results && (
-          <Results results={results} onReset={handleReset} />
-        )}
+          {loading && (
+            <motion.div
+              className="card loading-card"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+            >
+              <span className="spin">⚙️</span>
+              <span>Pulling weather data and estimating your ideal system size...</span>
+            </motion.div>
+          )}
+
+          {results && (
+            <Results results={results} onReset={handleReset} />
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
