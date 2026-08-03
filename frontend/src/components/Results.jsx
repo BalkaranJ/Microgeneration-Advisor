@@ -35,6 +35,7 @@ export default function Results({ results, onReset }) {
       <RoofSolarCard
         roofSolarPotential={results.roof_solar_potential}
         recommendedSystemSizeKw={results.recommended_system_size_kw}
+        fallbackCostEstimateCad={results.fallback_cost_estimate_cad}
         fadeUp={fadeUp(0.08)}
       />
 

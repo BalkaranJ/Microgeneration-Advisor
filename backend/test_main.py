@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 import main
+import solar
 
 client = TestClient(main.app)
 
@@ -44,6 +45,26 @@ AVAILABLE_ROOF_SOLAR = {
     },
     "verdict": "full_coverage",
     "verdict_message": "This roof can cover your entire annual usage, with credit to spare.",
+    "target_offset_pct": 100,
+    "recommended_meets_target": True,
+    "max_roof_capacity": {"panels_count": 24, "system_size_kw": 10.56, "estimated_annual_production_kwh": 12475.3},
+    "financials": {
+        "estimated_installed_cost_cad": 31680.0,   # 10.56 * 1000 * 3.00
+        "cost_per_watt_cad_assumed": 3.00,
+        "payback_period_years": None,              # no rate in this fixture -> no savings -> no payback
+        "panel_lifespan_years": 25,
+        "lifetime_net_savings_cad": None,
+        "note": (
+            "Rough planning-stage estimate only — excludes any government grants/rebates and "
+            "financing costs, and doesn't model panel output degradation or future utility rate "
+            "changes over the system's lifetime."
+        ),
+    },
+    "carbon_offset": {
+        "carbon_offset_factor_kg_per_mwh": 428.9,
+        "annual_co2_offset_kg": 5350.7,             # 12.4753 * 428.9
+        "lifetime_co2_offset_tonnes": 133.77,
+    },
     "roof_orientation": [
         {"direction": "S", "panels_count": 14, "estimated_annual_production_kwh": 7282.0},
         {"direction": "W", "panels_count": 7, "estimated_annual_production_kwh": 3520.0},
@@ -120,6 +141,25 @@ class TestAssessEndpoint(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         called_args = mock_get_solar.call_args.args
         self.assertIsNone(called_args[3])
+
+    @patch("main.get_building_solar_summary", new_callable=AsyncMock)
+    def test_available_roof_solar_has_no_fallback_cost_estimate(self, mock_get_solar):
+        mock_get_solar.return_value = AVAILABLE_ROOF_SOLAR
+
+        response = client.post("/assess", json=ASSESS_BODY)
+
+        self.assertIsNone(response.json()["fallback_cost_estimate_cad"])
+
+    @patch("main.get_building_solar_summary", new_callable=AsyncMock)
+    def test_degraded_solar_summary_includes_fallback_cost_estimate(self, mock_get_solar):
+        mock_get_solar.return_value = UNAVAILABLE_ROOF_SOLAR
+
+        response = client.post("/assess", json=ASSESS_BODY)
+        data = response.json()
+
+        # 5.54 kW is the existing fallback-size fixture value for 9000 kWh usage (see test above)
+        expected = round(5.54 * 1000 * solar.INSTALLED_COST_PER_WATT_CAD, 2)
+        self.assertAlmostEqual(data["fallback_cost_estimate_cad"], expected, places=2)
 
     @patch("main.get_building_solar_summary", new_callable=AsyncMock)
     def test_invalid_annual_usage_returns_422_without_calling_solar(self, mock_get_solar):

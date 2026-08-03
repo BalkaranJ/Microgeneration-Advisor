@@ -18,7 +18,7 @@ from advisor import (
 )
 from weather import geocode
 from bill_extractor import extract_bill_usage, BillExtractionError
-from solar import get_building_solar_summary, effective_rate_per_kwh
+from solar import get_building_solar_summary, effective_rate_per_kwh, estimate_installed_cost_cad
 from roof_image import fetch_roof_image, RoofImageError
 
 MAX_BILL_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -83,9 +83,11 @@ async def assess(body: AssessRequest):
         if roof_solar_potential.get("available"):
             effective_system_size_kw = roof_solar_potential["system_size_kw"]
             system_size_basis = "roof_matched"
+            fallback_cost_estimate_cad = None
         else:
             effective_system_size_kw = usage_based_fallback_kw
             system_size_basis = "usage_estimate"
+            fallback_cost_estimate_cad = estimate_installed_cost_cad(usage_based_fallback_kw)
 
         project = MicrogenerationProject(
             location=body.location,
@@ -99,6 +101,7 @@ async def assess(body: AssessRequest):
         result["roof_solar_potential"] = roof_solar_potential
         result["recommended_system_size_kw"] = effective_system_size_kw
         result["system_size_basis"] = system_size_basis
+        result["fallback_cost_estimate_cad"] = fallback_cost_estimate_cad
         return result
 
     except InvalidProjectInputError as e:

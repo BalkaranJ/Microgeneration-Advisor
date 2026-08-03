@@ -12,16 +12,28 @@ from solar import (
     SolarApiNotConfigured,
     SolarApiRequestError,
     azimuth_to_compass,
+    build_carbon_offset,
     build_comparison,
+    build_financials,
     classify_verdict,
     effective_rate_per_kwh,
+    estimate_installed_cost_cad,
     fetch_building_insights,
     get_building_solar_summary,
     parse_solar_potential,
     size_to_max_roof_capacity,
+    size_to_recommended_system,
     summarize_roof_orientation,
 )
 
+MID_CONFIG_ROOF_SEGMENT_SUMMARIES = [   # sums to the 16-panel config exactly
+    {"pitchDegrees": 20, "azimuthDegrees": 180, "panelsCount": 14, "yearlyEnergyDcKwh": 6620.0, "segmentIndex": 0},
+    {"pitchDegrees": 20, "azimuthDegrees": 270, "panelsCount": 2, "yearlyEnergyDcKwh": 940.8, "segmentIndex": 1},
+]
+LARGE_CONFIG_ROOF_SEGMENT_SUMMARIES = [  # sums to the 20-panel config exactly
+    {"pitchDegrees": 20, "azimuthDegrees": 180, "panelsCount": 14, "yearlyEnergyDcKwh": 6620.0, "segmentIndex": 0},
+    {"pitchDegrees": 20, "azimuthDegrees": 270, "panelsCount": 6, "yearlyEnergyDcKwh": 2831.0, "segmentIndex": 1},
+]
 MAX_CONFIG_ROOF_SEGMENT_SUMMARIES = [
     {"pitchDegrees": 20, "azimuthDegrees": 180, "panelsCount": 14, "yearlyEnergyDcKwh": 6620.0, "segmentIndex": 0},
     {"pitchDegrees": 20, "azimuthDegrees": 270, "panelsCount": 7, "yearlyEnergyDcKwh": 3200.0, "segmentIndex": 1},
@@ -41,8 +53,16 @@ SAMPLE_BUILDING_INSIGHTS = {
         "solarPanelConfigs": [
             {"panelsCount": 4, "yearlyEnergyDcKwh": 1890.2},
             {"panelsCount": 10, "yearlyEnergyDcKwh": 4725.5},
-            {"panelsCount": 16, "yearlyEnergyDcKwh": 7560.8},
-            {"panelsCount": 20, "yearlyEnergyDcKwh": 9451.0},
+            {
+                "panelsCount": 16,
+                "yearlyEnergyDcKwh": 7560.8,
+                "roofSegmentSummaries": MID_CONFIG_ROOF_SEGMENT_SUMMARIES,
+            },
+            {
+                "panelsCount": 20,
+                "yearlyEnergyDcKwh": 9451.0,
+                "roofSegmentSummaries": LARGE_CONFIG_ROOF_SEGMENT_SUMMARIES,
+            },
             {
                 "panelsCount": 24,
                 "yearlyEnergyDcKwh": 11341.2,
@@ -169,6 +189,103 @@ class TestSizeToMaxRoofCapacity(unittest.TestCase):
         })
         sized = size_to_max_roof_capacity(parsed)
         self.assertEqual(sized["roof_segment_summaries"], [])
+
+
+class TestSizeToRecommendedSystem(unittest.TestCase):
+    def setUp(self):
+        self.parsed = parse_solar_potential(SAMPLE_BUILDING_INSIGHTS)
+
+    def test_picks_smallest_config_meeting_target_offset(self):
+        # usage 9000, target 100% -> 16-panel (8316.9 kWh) falls short, 20-panel (10396.1) clears it
+        sized = size_to_recommended_system(self.parsed, annual_usage_kwh=9000)
+        self.assertEqual(sized["panels_count"], 20)
+        self.assertEqual(sized["system_size_kw"], round(20 * 440 / 1000, 2))
+        self.assertEqual(sized["estimated_annual_production_kwh"], round(9451.0 * 440 / 400, 1))
+        self.assertTrue(sized["target_met"])
+
+    def test_falls_back_to_max_config_when_target_unreachable(self):
+        sized = size_to_recommended_system(self.parsed, annual_usage_kwh=100_000)
+        self.assertEqual(sized["panels_count"], 24)
+        self.assertFalse(sized["target_met"])
+
+    def test_custom_target_offset_pct_picks_smaller_config(self):
+        # 50% of 9000 = 4500 -> 4-panel falls short, 10-panel (5198.05) clears it
+        sized = size_to_recommended_system(self.parsed, annual_usage_kwh=9000, target_offset_pct=50)
+        self.assertEqual(sized["panels_count"], 10)
+
+    def test_handles_unsorted_configs_defensively(self):
+        parsed = {
+            "panel_capacity_watts": 400,
+            "solar_panel_configs": [
+                {"panelsCount": 20, "yearlyEnergyDcKwh": 9451.0},
+                {"panelsCount": 4, "yearlyEnergyDcKwh": 1890.2},
+                {"panelsCount": 16, "yearlyEnergyDcKwh": 7560.8},
+                {"panelsCount": 10, "yearlyEnergyDcKwh": 4725.5},
+                {"panelsCount": 24, "yearlyEnergyDcKwh": 11341.2},
+            ],
+        }
+        sized = size_to_recommended_system(parsed, annual_usage_kwh=9000)
+        self.assertEqual(sized["panels_count"], 20)
+
+    def test_roof_segment_summaries_from_chosen_config_not_max(self):
+        sized = size_to_recommended_system(self.parsed, annual_usage_kwh=9000)
+        self.assertEqual(sized["roof_segment_summaries"], LARGE_CONFIG_ROOF_SEGMENT_SUMMARIES)
+
+    def test_none_when_no_configs(self):
+        parsed = parse_solar_potential({"solarPotential": {"panelCapacityWatts": 400}})
+        self.assertIsNone(size_to_recommended_system(parsed, annual_usage_kwh=9000))
+
+    def test_none_when_no_panel_capacity(self):
+        parsed = parse_solar_potential({
+            "solarPotential": {"solarPanelConfigs": [{"panelsCount": 4, "yearlyEnergyDcKwh": 100}]}
+        })
+        self.assertIsNone(size_to_recommended_system(parsed, annual_usage_kwh=9000))
+
+    def test_zero_usage_picks_smallest_config(self):
+        sized = size_to_recommended_system(self.parsed, annual_usage_kwh=0)
+        self.assertEqual(sized["panels_count"], 4)
+        self.assertTrue(sized["target_met"])
+
+
+class TestBuildFinancials(unittest.TestCase):
+    def test_computes_installed_cost_from_system_size(self):
+        result = build_financials(8.8, estimated_annual_savings_cad=1350.0)
+        self.assertEqual(result["estimated_installed_cost_cad"], round(8.8 * 1000 * solar.INSTALLED_COST_PER_WATT_CAD, 2))
+
+    def test_payback_period_when_savings_known(self):
+        result = build_financials(8.8, estimated_annual_savings_cad=1350.0)
+        cost = result["estimated_installed_cost_cad"]
+        self.assertEqual(result["payback_period_years"], round(cost / 1350.0, 1))
+
+    def test_payback_none_when_savings_none(self):
+        result = build_financials(8.8, estimated_annual_savings_cad=None)
+        self.assertIsNone(result["payback_period_years"])
+        self.assertIsNone(result["lifetime_net_savings_cad"])
+
+    def test_payback_none_when_savings_zero(self):
+        result = build_financials(8.8, estimated_annual_savings_cad=0)
+        self.assertIsNone(result["payback_period_years"])
+
+    def test_lifetime_net_savings_over_default_lifespan(self):
+        result = build_financials(8.8, estimated_annual_savings_cad=1350.0)
+        cost = result["estimated_installed_cost_cad"]
+        self.assertEqual(result["lifetime_net_savings_cad"], round(1350.0 * 25 - cost, 2))
+
+    def test_custom_cost_per_watt_and_lifespan(self):
+        result = build_financials(10.0, 1000.0, cost_per_watt_cad=3.5, lifespan_years=20)
+        self.assertEqual(result["estimated_installed_cost_cad"], 35000.0)
+        self.assertEqual(result["panel_lifespan_years"], 20)
+
+
+class TestBuildCarbonOffset(unittest.TestCase):
+    def test_computes_annual_and_lifetime_offset(self):
+        result = build_carbon_offset(10396.1, carbon_offset_factor_kg_per_mwh=428.9)
+        expected_annual = round((10396.1 / 1000) * 428.9, 1)
+        self.assertEqual(result["annual_co2_offset_kg"], expected_annual)
+        self.assertEqual(result["lifetime_co2_offset_tonnes"], round(expected_annual * 25 / 1000, 2))
+
+    def test_none_when_factor_missing(self):
+        self.assertIsNone(build_carbon_offset(10396.1, None))
 
 
 class TestAzimuthToCompass(unittest.TestCase):
@@ -310,20 +427,57 @@ class TestGetBuildingSolarSummary(unittest.IsolatedAsyncioTestCase):
              patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, annual_usage_kwh=9000, rate_per_kwh=0.15)
         self.assertTrue(summary["available"])
-        self.assertEqual(summary["panels_count"], 24)
-        self.assertEqual(summary["system_size_kw"], 10.56)
-        self.assertEqual(summary["estimated_annual_production_kwh"], 12475.3)
+        self.assertEqual(summary["panels_count"], 20)
+        self.assertEqual(summary["system_size_kw"], 8.8)
+        self.assertEqual(summary["estimated_annual_production_kwh"], round(9451.0 * 440 / 400, 1))
         self.assertIn(summary["verdict"], {"full_coverage", "partial_coverage", "too_small"})
         self.assertNotIn("assumptions", summary)
         self.assertIsNotNone(summary["disclaimer"])
         self.assertIsNotNone(summary["comparison"]["estimated_annual_savings_cad"])
+        self.assertEqual(summary["target_offset_pct"], 100)
+        self.assertTrue(summary["recommended_meets_target"])
+        self.assertIn("max_roof_capacity", summary)
+        self.assertEqual(summary["max_roof_capacity"]["panels_count"], 24)
+        self.assertIn("financials", summary)
+        self.assertIn("carbon_offset", summary)
 
-    async def test_roof_orientation_grouped_from_max_config(self):
+    async def test_roof_orientation_grouped_from_recommended_config(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
              patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, 9000)
         directions = {r["direction"] for r in summary["roof_orientation"]}
-        self.assertEqual(directions, {"S", "W", "E"})
+        self.assertEqual(directions, {"S", "W"})
+
+    async def test_recommended_falls_back_to_max_when_target_unreachable(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, annual_usage_kwh=100_000)
+        self.assertEqual(summary["panels_count"], summary["max_roof_capacity"]["panels_count"])
+        self.assertFalse(summary["recommended_meets_target"])
+
+    async def test_financials_use_recommended_system_size(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000, rate_per_kwh=0.15)
+        expected_cost = round(summary["system_size_kw"] * 1000 * solar.INSTALLED_COST_PER_WATT_CAD, 2)
+        self.assertEqual(summary["financials"]["estimated_installed_cost_cad"], expected_cost)
+
+    async def test_carbon_offset_present_when_factor_available(self):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+        self.assertIsNotNone(summary["carbon_offset"])
+        self.assertEqual(summary["carbon_offset"]["carbon_offset_factor_kg_per_mwh"], 428.9)
+
+    async def test_carbon_offset_none_when_factor_missing(self):
+        raw = {**SAMPLE_BUILDING_INSIGHTS}
+        raw["solarPotential"] = {**raw["solarPotential"]}
+        raw["solarPotential"].pop("carbonOffsetFactorKgPerMwh")
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=raw)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+        self.assertTrue(summary["available"])
+        self.assertIsNone(summary["carbon_offset"])
 
     async def test_monthly_breakdown_distributed_by_real_irradiance(self):
         with patch("solar.fetch_building_insights", new=AsyncMock(return_value=SAMPLE_BUILDING_INSIGHTS)), \
