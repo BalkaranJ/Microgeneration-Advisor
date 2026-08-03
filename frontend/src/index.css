@@ -60,6 +60,8 @@ body::before {
 /* ─── Layout ─────────────────────────────────────── */
 
 .app {
+  position: relative;
+  z-index: 1;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -843,7 +845,7 @@ body::before {
   color: var(--text-muted);
 }
 
-/* ─── Landing ──────────────────────────────────────── */
+/* ─── Background decor (shared: Landing + App) ──────── */
 
 .bg-sun {
   position: fixed;
@@ -872,6 +874,8 @@ body::before {
 }
 
 .bg-skyline svg { width: 100%; height: 100%; display: block; }
+
+/* ─── Landing ──────────────────────────────────────── */
 
 .landing {
   position: relative;
