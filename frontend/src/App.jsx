@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { motion } from 'framer-motion'
+import Landing from './components/Landing'
 import Step from './components/Step'
 import Results from './components/Results'
 
@@ -21,6 +22,7 @@ const STEPS = [
 ]
 
 export default function App() {
+  const [showIntro,   setShowIntro]   = useState(true)
   const [answers,     setAnswers]     = useState({})
   const [currentStep, setCurrentStep] = useState(0)
   const [results,     setResults]     = useState(null)
@@ -78,6 +80,10 @@ export default function App() {
     setError(null)
   }
 
+  if (showIntro) {
+    return <Landing onStart={() => setShowIntro(false)} />
+  }
+
   return (
     <div className="app">
       <motion.header
@@ -86,9 +92,9 @@ export default function App() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
       >
-        <span className="app-icon">⚡</span>
-        <div className="app-title">Microgeneration Readiness Advisor</div>
-        <div className="app-subtitle">Alberta solar, simplified</div>
+        <span className="app-icon">☀️</span>
+        <div className="app-title">SolarFit</div>
+        <div className="app-subtitle">Solar, simplified</div>
       </motion.header>
 
       <div className="feed">
