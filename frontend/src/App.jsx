@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
-import AnswerBubble from './components/AnswerBubble'
+import { motion } from 'framer-motion'
 import Step from './components/Step'
 import Results from './components/Results'
 
@@ -21,16 +20,6 @@ const STEPS = [
   },
 ]
 
-function getDisplayValue(stepId, value) {
-  const step = STEPS.find(s => s.id === stepId)
-  if (step?.type === 'choice') {
-    const choice = step.choices.find(c => c.value === value)
-    return choice ? `${choice.icon} ${choice.label}` : value
-  }
-  if (step?.unit) return `${value} ${step.unit}`
-  return value
-}
-
 export default function App() {
   const [answers,     setAnswers]     = useState({})
   const [currentStep, setCurrentStep] = useState(0)
@@ -38,8 +27,7 @@ export default function App() {
   const [loading,     setLoading]     = useState(false)
   const [error,       setError]       = useState(null)
 
-  const completedSteps = STEPS.slice(0, currentStep)
-  const activeStep     = STEPS[currentStep]
+  const activeStep = STEPS[currentStep]
 
   async function handleAnswer(value, meta) {
     const newAnswers = {
@@ -104,20 +92,12 @@ export default function App() {
       </motion.header>
 
       <div className="feed">
-        <AnimatePresence>
-          {completedSteps.map(step => (
-            <AnswerBubble
-              key={step.id}
-              question={step.question}
-              answer={getDisplayValue(step.id, answers[step.id])}
-            />
-          ))}
-        </AnimatePresence>
-
         {!results && !loading && activeStep && (
           <Step
             key={activeStep.id}
             step={activeStep}
+            stepIndex={currentStep}
+            stepCount={STEPS.length}
             onAnswer={handleAnswer}
             error={error}
           />

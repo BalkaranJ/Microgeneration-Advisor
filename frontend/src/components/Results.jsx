@@ -36,19 +36,19 @@ export default function Results({ results, onReset }) {
         roofSolarPotential={results.roof_solar_potential}
         recommendedSystemSizeKw={results.recommended_system_size_kw}
         fallbackCostEstimateCad={results.fallback_cost_estimate_cad}
-        fadeUp={fadeUp(0.08)}
+        startDelay={0.08}
       />
 
-      <motion.div className="card" {...fadeUp(0.16)}>
+      <motion.div className="card" {...fadeUp(0.5)}>
         <p className="section-label">Before you go further</p>
         {results.checklist.map((item, i) => (
           <ChecklistItem key={i} text={item} />
         ))}
       </motion.div>
 
-      <VendorsNextSteps fadeUp={fadeUp(0.24)} />
+      <VendorsNextSteps fadeUp={fadeUp(0.58)} />
 
-      <motion.button className="reset-btn" onClick={onReset} {...fadeUp(0.32)}>
+      <motion.button className="reset-btn" onClick={onReset} {...fadeUp(0.66)}>
         Start over
       </motion.button>
     </div>
