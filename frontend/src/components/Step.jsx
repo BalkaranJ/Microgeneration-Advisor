@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import BillUpload from './BillUpload'
 import AddressConfirm from './AddressConfirm'
 
-export default function Step({ step, onAnswer, error }) {
+export default function Step({ step, stepIndex, stepCount, onAnswer, error }) {
   const [value, setValue] = useState('')
 
   function handleSubmit(e) {
@@ -19,6 +19,13 @@ export default function Step({ step, onAnswer, error }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
     >
+      {stepCount > 1 && (
+        <div className="stepper">
+          {Array.from({ length: stepCount }, (_, i) => (
+            <i key={i} className={i <= stepIndex ? 'done' : ''} />
+          ))}
+        </div>
+      )}
       <p className="step-question">{step.question}</p>
       {step.hint && <p className="step-hint">{step.hint}</p>}
 
