@@ -21,7 +21,7 @@ const VERDICT_CLASS = {
   too_small: 'offset-toosmall',
 }
 
-export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystemSizeKw, fadeUp }) {
+export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystemSizeKw, fallbackCostEstimateCad, fadeUp }) {
   if (!r) return null
 
   if (!r.available) {
@@ -35,6 +35,9 @@ export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystem
           <p className="savings-note-text">
             Rough estimate without roof data: ~{recommendedSystemSizeKw} kW, sized to offset about 80% of your
             annual usage. This is a general rule of thumb, not specific to your roof.
+            {fallbackCostEstimateCad != null && (
+              <> Rough installed cost: ~${Math.round(fallbackCostEstimateCad).toLocaleString()} CAD, before any grants/rebates.</>
+            )}
           </p>
         )}
       </motion.div>
@@ -107,9 +110,63 @@ export default function RoofSolarCard({ roofSolarPotential: r, recommendedSystem
               </div>
             ))}
           </div>
+          {!r.recommended_meets_target ? (
+            <p className="savings-note-text">
+              Even using this roof's entire buildable area ({r.max_roof_capacity.panels_count} panels), it can't
+              fully offset your usage — the numbers above already reflect the whole roof.
+            </p>
+          ) : r.max_roof_capacity.panels_count > r.panels_count && (
+            <p className="savings-note-text">
+              Sized to your usage using this roof's best-facing side(s) first — a real installer typically
+              wouldn't build out the whole roof if it isn't needed. This roof could hold up to{' '}
+              {r.max_roof_capacity.panels_count} panels (~{r.max_roof_capacity.system_size_kw} kW) if you wanted
+              to build out further.
+            </p>
+          )}
+        </>
+      )}
+
+      {r.financials && (
+        <>
+          <p className="subsection-label">Estimated Cost & Payback</p>
+          <div className="roof-stats-grid">
+            <StatTile
+              value={`$${Math.round(r.financials.estimated_installed_cost_cad).toLocaleString()}`}
+              label={`Est. installed cost (~$${r.financials.cost_per_watt_cad_assumed}/W)`}
+            />
+            <StatTile
+              value={r.financials.payback_period_years != null ? `${r.financials.payback_period_years} yrs` : '—'}
+              label="Payback period"
+            />
+            <StatTile
+              value={
+                r.financials.lifetime_net_savings_cad != null
+                  ? `$${Math.round(r.financials.lifetime_net_savings_cad).toLocaleString()}`
+                  : '—'
+              }
+              label={`Net savings over ${r.financials.panel_lifespan_years} yrs`}
+            />
+          </div>
+          <p className="savings-note-text">{r.financials.note}</p>
+        </>
+      )}
+
+      {r.carbon_offset && (
+        <>
+          <p className="subsection-label">Environmental Impact</p>
+          <div className="roof-stats-grid">
+            <StatTile
+              value={`${Math.round(r.carbon_offset.annual_co2_offset_kg).toLocaleString()} kg`}
+              label="CO₂ offset per year"
+            />
+            <StatTile
+              value={`${r.carbon_offset.lifetime_co2_offset_tonnes.toLocaleString()} t`}
+              label={`Over ${r.financials?.panel_lifespan_years ?? 25} yrs`}
+            />
+          </div>
           <p className="savings-note-text">
-            A real installer often only builds on the best-facing side(s) of a roof, not every facet —
-            which is why a live quote can come in well under the whole-roof max shown above.
+            Based on your local grid's carbon intensity ({r.carbon_offset.carbon_offset_factor_kg_per_mwh} kg
+            CO₂/MWh), from Google's Solar API.
           </p>
         </>
       )}
