@@ -177,3 +177,6 @@ frontend/dist/
 
 # Node
 frontend/node_modules/
+
+# Docs (local reference material, not part of the repo)
+docs/
