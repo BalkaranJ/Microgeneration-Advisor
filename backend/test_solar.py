@@ -3,6 +3,8 @@ Unit tests for backend/solar.py — Google Solar API integration. No live API
 key is used anywhere here; all HTTP calls are faked/mocked.
 """
 
+import asyncio
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
@@ -522,35 +524,64 @@ class TestGetBuildingSolarSummary(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["monthly_breakdown"], [])
 
     async def test_no_coverage_degrades_gracefully(self):
-        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNoCoverage("nope"))):
+        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNoCoverage("nope"))), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "no_coverage")
 
     async def test_not_configured_degrades_gracefully(self):
-        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNotConfigured("no key"))):
+        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiNotConfigured("no key"))), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "not_configured")
 
     async def test_request_error_collapses_to_error(self):
-        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiRequestError("bad key"))):
+        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=SolarApiRequestError("bad key"))), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "error")
 
     async def test_unexpected_exception_collapses_to_error(self):
-        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=RuntimeError("boom"))):
+        with patch("solar.fetch_building_insights", new=AsyncMock(side_effect=RuntimeError("boom"))), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "error")
 
     async def test_no_panel_data_when_configs_missing(self):
         malformed = {"solarPotential": {}}
-        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=malformed)):
+        with patch("solar.fetch_building_insights", new=AsyncMock(return_value=malformed)), \
+             patch("solar.fetch_daily_irradiance", new=AsyncMock(return_value=FAKE_DAILY_IRRADIANCE)):
             summary = await get_building_solar_summary(51.05, -114.07, 9000)
         self.assertFalse(summary["available"])
         self.assertEqual(summary["reason"], "no_panel_data")
+
+    async def test_irradiance_fetch_runs_concurrently_with_building_insights(self):
+        """
+        Verifies the two independent external calls actually run in parallel
+        (asyncio.gather), not one after another: each mock sleeps 0.2s, so a
+        sequential await chain would take >=0.4s while a concurrent one stays
+        near 0.2s.
+        """
+        async def slow_insights(*_args, **_kwargs):
+            await asyncio.sleep(0.2)
+            return SAMPLE_BUILDING_INSIGHTS
+
+        async def slow_irradiance(*_args, **_kwargs):
+            await asyncio.sleep(0.2)
+            return FAKE_DAILY_IRRADIANCE
+
+        with patch("solar.fetch_building_insights", new=slow_insights), \
+             patch("solar.fetch_daily_irradiance", new=slow_irradiance):
+            start = time.perf_counter()
+            summary = await get_building_solar_summary(51.05, -114.07, 9000)
+            elapsed = time.perf_counter() - start
+
+        self.assertTrue(summary["available"])
+        self.assertLess(elapsed, 0.35)
 
 
 if __name__ == "__main__":

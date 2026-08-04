@@ -7,6 +7,7 @@ degrades to {"available": False, "reason": ..., "message": ...} so
 when Google has no imagery for an address, the key isn't configured, or
 the request otherwise fails.
 """
+import asyncio
 import os
 from typing import Optional
 
@@ -391,23 +392,24 @@ def build_carbon_offset(
     }
 
 
-async def _build_monthly_breakdown(
-    lat: float,
-    lon: float,
+def _build_monthly_breakdown(
+    daily: Optional[dict],
     estimated_annual_production_kwh: float,
     monthly_usage_history: Optional[list],
     rate_per_kwh: Optional[float],
 ) -> list:
     """
-    Best-effort: fetches real historical solar irradiance for this exact
-    location over the trailing 365 days and uses it to distribute the
-    roof's annual production estimate across actual calendar months, then
-    left-joins the user's own bill-extracted monthly usage/cost history
-    (matched by YYYY-MM). Never raises — [] on any failure, so the
+    Best-effort: uses the trailing-365-day daily irradiance already fetched
+    for this location (concurrently with the building insights call, see
+    get_building_solar_summary) to distribute the roof's annual production
+    estimate across actual calendar months, then left-joins the user's own
+    bill-extracted monthly usage/cost history (matched by YYYY-MM). Never
+    raises — [] if `daily` is unavailable or on any failure, so the
     frontend can just hide this section.
     """
+    if daily is None:
+        return []
     try:
-        daily = await fetch_daily_irradiance(lat, lon)
         monthly_irradiance = aggregate_monthly_irradiance(daily)
         monthly_production = distribute_annual_production(monthly_irradiance, estimated_annual_production_kwh)
     except Exception:
@@ -442,27 +444,42 @@ async def get_building_solar_summary(
     Never raises. Returns the dict embedded as /assess's
     "roof_solar_potential" field — either {"available": True, ...} or
     {"available": False, "reason": ..., "message": ...}.
+
+    Building insights (Google Solar) and daily irradiance (NASA POWER) are
+    both keyed only on lat/lon and don't depend on each other, so they're
+    fetched concurrently via asyncio.gather instead of one after another —
+    the request's wall-clock time is bounded by the slower of the two
+    calls rather than their sum. return_exceptions=True keeps a failure in
+    either call from cancelling the other; irradiance is best-effort
+    (see _build_monthly_breakdown) so its failure alone shouldn't take
+    down an otherwise-successful building-insights response.
     """
-    try:
-        raw = await fetch_building_insights(lat, lon, api_key)
-    except SolarApiNotConfigured:
+    raw_result, daily_result = await asyncio.gather(
+        fetch_building_insights(lat, lon, api_key),
+        fetch_daily_irradiance(lat, lon),
+        return_exceptions=True,
+    )
+
+    if isinstance(raw_result, SolarApiNotConfigured):
         return {
             "available": False,
             "reason": "not_configured",
             "message": "Roof-level solar data isn't configured for this deployment.",
         }
-    except SolarApiNoCoverage:
+    if isinstance(raw_result, SolarApiNoCoverage):
         return {
             "available": False,
             "reason": "no_coverage",
             "message": "High-resolution roof imagery isn't available for this address yet.",
         }
-    except Exception:
+    if isinstance(raw_result, Exception):
         return {
             "available": False,
             "reason": "error",
             "message": "Roof-level solar data is temporarily unavailable.",
         }
+    raw = raw_result
+    daily = None if isinstance(daily_result, Exception) else daily_result
 
     try:
         parsed = parse_solar_potential(raw)
@@ -482,8 +499,8 @@ async def get_building_solar_summary(
         verdict = classify_verdict(comparison["offset_pct"])
         wattage_ratio = recommended["panel_watts_assumed"] / recommended["google_panel_capacity_watts"]
         roof_orientation = summarize_roof_orientation(recommended["roof_segment_summaries"], wattage_ratio)
-        monthly_breakdown = await _build_monthly_breakdown(
-            lat, lon, recommended["estimated_annual_production_kwh"], monthly_usage_history, rate_per_kwh
+        monthly_breakdown = _build_monthly_breakdown(
+            daily, recommended["estimated_annual_production_kwh"], monthly_usage_history, rate_per_kwh
         )
         financials = build_financials(recommended["system_size_kw"], comparison["estimated_annual_savings_cad"])
         carbon_offset = build_carbon_offset(

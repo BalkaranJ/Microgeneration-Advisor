@@ -5,6 +5,8 @@ FastAPI backend — exposes three endpoints:
   POST /extract-bill   utility bill photo -> extracted usage data
 """
 
+import asyncio
+
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -126,6 +128,11 @@ async def extract_bill(file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail="Image is too large. Please upload a photo under 10MB.")
 
     try:
-        return extract_bill_usage(image_bytes, file.content_type)
+        # extract_bill_usage() makes a synchronous, blocking Anthropic API call
+        # (multi-second for vision/PDF extraction). Run it in a worker thread so
+        # it doesn't freeze the single-threaded event loop — otherwise every other
+        # in-flight request (other users' /assess, /geocode, ...) would stall for
+        # the full duration of this call.
+        return await asyncio.to_thread(extract_bill_usage, image_bytes, file.content_type)
     except BillExtractionError as e:
         raise HTTPException(status_code=422, detail=str(e))

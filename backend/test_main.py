@@ -5,10 +5,13 @@ External calls (get_building_solar_summary) are mocked; no live services
 are hit.
 """
 
+import asyncio
+import time
 import unittest
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 import main
 import solar
@@ -210,6 +213,76 @@ class TestRoofImageEndpoint(unittest.TestCase):
         response = client.get("/roof-image", params={"lat": 51.05, "lon": -114.07})
 
         self.assertEqual(response.status_code, 502)
+
+
+class TestExtractBillEndpoint(unittest.TestCase):
+    @patch("main.extract_bill_usage")
+    def test_success_returns_extracted_data(self, mock_extract):
+        mock_extract.return_value = {"provider": "Enmax", "annual_usage_kwh": 9000}
+
+        response = client.post(
+            "/extract-bill", files={"file": ("bill.jpg", b"fake-image-bytes", "image/jpeg")}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["provider"], "Enmax")
+
+    @patch("main.extract_bill_usage")
+    def test_extraction_failure_returns_422(self, mock_extract):
+        from bill_extractor import BillExtractionError
+        mock_extract.side_effect = BillExtractionError("could not read bill")
+
+        response = client.post(
+            "/extract-bill", files={"file": ("bill.jpg", b"fake-image-bytes", "image/jpeg")}
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_oversized_file_returns_413_without_calling_extractor(self):
+        oversized = b"0" * (10 * 1024 * 1024 + 1)
+
+        response = client.post(
+            "/extract-bill", files={"file": ("bill.jpg", oversized, "image/jpeg")}
+        )
+
+        self.assertEqual(response.status_code, 413)
+
+
+class TestExtractBillDoesNotBlockEventLoop(unittest.IsolatedAsyncioTestCase):
+    async def test_slow_bill_extraction_runs_off_the_event_loop(self):
+        """
+        extract_bill_usage() is a synchronous, blocking call (real network I/O
+        to Claude). Regression test: it must run via asyncio.to_thread so a
+        slow extraction can't stall other requests on the event loop.
+        Simulated with a real time.sleep() inside the (mocked) extractor — if
+        it ran directly on the event loop instead of a worker thread, the
+        concurrent /geocode request below would be forced to wait behind it.
+        """
+        def slow_extract(_image_bytes, _content_type):
+            time.sleep(0.3)
+            return {"provider": "Enmax", "annual_usage_kwh": 9000}
+
+        async def fast_geocode(_address):
+            return {"lat": 51.05, "lon": -114.07, "display_name": "Calgary, AB"}
+
+        with patch("main.extract_bill_usage", new=slow_extract), \
+             patch("main.geocode", new=fast_geocode):
+            transport = ASGITransport(app=main.app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                bill_task = asyncio.create_task(
+                    ac.post("/extract-bill", files={"file": ("bill.jpg", b"x", "image/jpeg")})
+                )
+                await asyncio.sleep(0.05)  # let the slow request start first
+
+                geocode_start = time.perf_counter()
+                geocode_response = await ac.post("/geocode", json={"address": "123 Main St"})
+                geocode_elapsed = time.perf_counter() - geocode_start
+
+                bill_response = await bill_task
+
+        self.assertEqual(bill_response.status_code, 200)
+        self.assertEqual(geocode_response.status_code, 200)
+        self.assertLess(geocode_elapsed, 0.2)
 
 
 if __name__ == "__main__":
