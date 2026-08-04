@@ -19,7 +19,7 @@ export default function Landing({ onStart }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4 }}
         >
-          <h1>Know if solar fits your roof, <em>before</em> you spend a dollar.</h1>
+          <h1>See your solar savings, <em>before</em> you spend a dollar finding out.</h1>
           <p>
             Enter your address and a photo of your electricity bill. SolarFit pulls real
             satellite roof data, real historical weather, and your own usage to give you a
