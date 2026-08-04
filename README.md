@@ -20,7 +20,7 @@ You plug in your address (confirming the exact resolved location) and your rough
 - The panel count, system size, and estimated yearly production for that roof, plus the roof's whole-buildable-area ceiling shown separately for context
 - A plain verdict — covers everything with credit to spare, covers part of your bill, or the roof's too small to make a real dent — plus a disclaimer
 - Rough installation cost and payback period, and estimated CO₂ offset, both fully sourced — see [ANALYSIS_METHODOLOGY.md](ANALYSIS_METHODOLOGY.md) for exactly how every number here is calculated
-- A readiness checklist of things to sort out before you go any further, and a (for-now placeholder) vendors/next-steps section
+- A one-card "bottom line": a verdict-colored headline, one line of reasoning tied to your actual numbers (stale imagery, a fallback estimate with no roof data, an out-of-scope system size), and a single next move: get quotes, or skip it for now
 
 Simple. That's the whole idea.
 
@@ -30,7 +30,7 @@ Simple. That's the whole idea.
 
 The app is split into two pieces:
 
-- **`backend/`** — a FastAPI service. `main.py` exposes `/geocode` and `/assess` endpoints, `advisor.py` holds the classification/checklist logic, `weather.py` calls out to Nominatim for geocoding, and `solar.py` calls Google's Solar API to size a system from the roof and build the verdict report.
+- **`backend/`** — a FastAPI service. `main.py` exposes `/geocode` and `/assess` endpoints, `advisor.py` holds the classification/bottom-line logic, `weather.py` calls out to Nominatim for geocoding, and `solar.py` calls Google's Solar API to size a system from the roof and build the verdict report.
 - **`frontend/`** — a React + Vite app that walks the user through a conversational, one-question-at-a-time form and calls the backend to render the results.
 
 ## How to run it
@@ -83,12 +83,12 @@ Or via the helper script from the repo root: `bash Phase3/scripts/run_tests.sh`.
 
 ## How the code is put together
 
-### Classification & checklist — `backend/advisor.py`
+### Classification & bottom line — `backend/advisor.py`
 
 - `MicrogenerationProject` — bundles and validates the user's inputs (location, energy usage, system size). Validation failures raise a custom `InvalidProjectInputError`, which the API layer turns into a friendly 422 response instead of a crash.
 - `estimate_target_system_size_kw()` — a rule-of-thumb sizing function: targets a conservative ~80% offset of annual usage at an assumed Alberta-wide yield (1,300 kWh/kW/year). Used only as the fallback size when Google Solar roof data isn't available — see `solar.py` below for the primary, roof-based sizing.
 - `ProjectClassifier` — categorises the project as small (≤10 kW), medium (≤150 kW), or large/out-of-scope, and builds a fuller label like "Small solar microgeneration concept."
-- `ReadinessAdvisor` — a lean facade. One method, `assess()`, classifies the project and returns the readiness checklist. The actual production/offset verdict lives entirely in `solar.py`'s report, not here (a generic weather-based suitability score used to live here too, but was dropped in favor of that more concrete, roof-specific verdict).
+- `ReadinessAdvisor` — a lean facade. One method, `assess()`, classifies the project and builds a single verdict-driven "bottom line" (a `tone`, a headline, one line of reasoning tied to the actual numbers, and a next action: get quotes, or skip it for now), from the same roof/verdict data `solar.py` already computed. The actual production/offset verdict lives entirely in `solar.py`'s report, not here (a generic weather-based suitability score used to live here too, but was dropped in favor of that more concrete, roof-specific verdict).
 
 ### Geocoding — `backend/weather.py`
 
@@ -104,7 +104,7 @@ A thin FastAPI layer with three endpoints: `/geocode` (address string → resolv
 
 ### The UI — `frontend/`
 
-Built with React + Vite. `App.jsx` drives a conversational, one-question-at-a-time flow — just address and annual usage now — (see `components/Step.jsx`, `components/AddressConfirm.jsx`, and `AnswerBubble.jsx`), then calls `/assess` and renders the result via `components/Results.jsx`, which composes `RoofSolarCard.jsx` (the sizing/verdict/assumptions report), the readiness checklist, and `VendorsNextSteps.jsx` (currently a placeholder — no vendor names yet). The address step calls `/geocode` first and requires the user to confirm the resolved address before continuing, since free-text geocoding can occasionally resolve to the wrong building on ambiguously-named streets.
+Built with React + Vite. `App.jsx` drives a conversational, one-question-at-a-time flow — just address and annual usage now — (see `components/Step.jsx` and `components/AddressConfirm.jsx`), then calls `/assess` and renders the result via `components/Results.jsx`, which composes `RoofSolarCard.jsx` (the sizing/verdict/assumptions report) and `BottomLine.jsx` (the single verdict-colored headline/reasoning/action card). The address step calls `/geocode` first and requires the user to confirm the resolved address before continuing, since free-text geocoding can occasionally resolve to the wrong building on ambiguously-named streets.
 
 ---
 

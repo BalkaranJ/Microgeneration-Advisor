@@ -776,57 +776,57 @@ body::before {
   color: var(--text-muted);
 }
 
-/* ─── Checklist ────────────────────────────────────── */
+/* ─── Bottom line ──────────────────────────────────── */
 
-.checklist-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-}
-
-.checklist-item:last-child {
-  border-bottom: none;
-}
-
-.checklist-circle {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1.5px solid var(--gold);
-  flex-shrink: 0;
-  margin-top: 1px;
-}
-
-.checklist-text {
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.45;
-}
-
-.vendors-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 6px;
-  padding: 24px 16px;
-  border: 1.5px dashed var(--border);
+.bottom-line {
+  border-left: 4px solid var(--accent);
+  background: var(--accent-dim);
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  margin-bottom: 12px;
+  padding: 16px 18px;
 }
 
-.vendors-placeholder-title {
-  font-size: 13px;
+.bottom-line.good    { --accent: var(--good); --accent-dim: var(--good-dim); }
+.bottom-line.warn    { --accent: var(--warn); --accent-dim: var(--warn-dim); }
+.bottom-line.bad     { --accent: var(--bad);  --accent-dim: var(--bad-dim); }
+.bottom-line.neutral { --accent: var(--gold); --accent-dim: var(--gold-dim); }
+
+.bottom-line-eyebrow {
+  font-size: 10.5px;
   font-weight: 700;
-  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+  margin: 0 0 10px;
 }
 
-.vendors-placeholder-note {
+.bottom-line-headline {
+  font-size: 17px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.bottom-line-body {
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+}
+
+.bottom-line-action-go {
+  display: inline-block;
+  background: var(--gold);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 700;
+  padding: 9px 16px;
+  border-radius: var(--radius-sm);
+}
+
+.bottom-line-action-skip {
   font-size: 12px;
-  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .reset-btn {

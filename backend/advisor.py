@@ -67,26 +67,78 @@ class ProjectClassifier:
 
 class ReadinessAdvisor:
     """
-    Facade for classification + the readiness checklist. The actual
-    production/offset verdict lives in solar.py's roof-capacity report;
-    this class no longer needs external data to do its job.
+    Facade for classification + a single verdict-driven "bottom line." This
+    app answers "will solar save you money, and is it worth pursuing," not
+    "how do I install solar," so this isn't installer-readiness steps. It's
+    one headline, one line of reasoning, and one action, built from the same
+    roof/verdict data solar.py already computed.
     """
     def __init__(self):
         self._classifier = ProjectClassifier()
 
-    def assess(self, project):
+    def assess(self, project, roof_solar_potential=None, system_size_basis=None):
         return {
             "classification": self._classifier.describe(project),
             "size_category":  self._classifier.classify(project),
-            "checklist":      self._build_checklist(),
+            "bottom_line":    self._build_bottom_line(project, roof_solar_potential, system_size_basis),
         }
 
-    def _build_checklist(self):
-        return [
-            "Confirm annual electricity usage from utility bills",
-            "Confirm the recommended system size with a qualified installer",
-            "Review utility interconnection requirements",
-            "Confirm equipment and safety requirements",
-            "Confirm site details such as roof orientation and shading",
-            "Understand that this result is only a pre-application estimate",
-        ]
+    def _build_bottom_line(self, project, roof_solar_potential, system_size_basis):
+        usage_kwh = format(project.get_annual_usage(), ",.0f")
+
+        if system_size_basis == "usage_estimate":
+            result = {
+                "tone": "neutral",
+                "headline": "We can't fully verify this yet.",
+                "body": (
+                    "No roof-specific data was available for this address, so the size and "
+                    "cost above are a flat regional average, not tailored to your actual "
+                    "roof. Confirm your %s kWh usage figure and get a real quote before "
+                    "treating this as decision-ready." % usage_kwh
+                ),
+                "action": {"type": "go", "label": "Get 2-3 installer quotes"},
+            }
+        else:
+            r = roof_solar_potential or {}
+            verdict = r.get("verdict")
+            panels = r.get("panels_count")
+            offset_pct = (r.get("comparison") or {}).get("offset_pct")
+            imagery_clause = "sized from %s imagery, " % r["imagery_date"] if r.get("imagery_date") else ""
+
+            if verdict == "too_small":
+                result = {
+                    "tone": "bad",
+                    "headline": "Skip it, at least for this roof.",
+                    "body": (
+                        "Even maxing out this roof's %s panels only reaches %s%% of your "
+                        "reported %s kWh usage. That's this structure alone, not any other "
+                        "roof or ground space on the property." % (panels, offset_pct, usage_kwh)
+                    ),
+                    "action": {
+                        "type": "skip",
+                        "label": "Worth another look if usage drops or roof access changes.",
+                    },
+                }
+            else:
+                result = {
+                    "tone": "good" if verdict == "full_coverage" else "warn",
+                    "headline": (
+                        "Get quotes. This pencils out."
+                        if verdict == "full_coverage"
+                        else "Get quotes. This helps, but won't cover everything."
+                    ),
+                    "body": (
+                        "%s panels on this roof, %scover %s%% of your reported %s kWh usage. "
+                        "Worth confirming that usage figure and getting the roof itself "
+                        "inspected before signing anything." % (panels, imagery_clause, offset_pct, usage_kwh)
+                    ),
+                    "action": {"type": "go", "label": "Get 2-3 installer quotes"},
+                }
+
+        if self._classifier.classify(project).startswith("Large"):
+            result["body"] += (
+                " A system this size also falls outside typical residential microgeneration "
+                "rules and likely needs a different regulatory path."
+            )
+
+        return result

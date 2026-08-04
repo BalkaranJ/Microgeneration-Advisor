@@ -1,7 +1,6 @@
 import { motion } from 'framer-motion'
 import RoofSolarCard from './RoofSolarCard'
-import VendorsNextSteps from './VendorsNextSteps'
-import ChecklistItem from './ChecklistItem'
+import BottomLine from './BottomLine'
 
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 16 },
@@ -39,16 +38,9 @@ export default function Results({ results, onReset }) {
         startDelay={0.08}
       />
 
-      <motion.div className="card" {...fadeUp(0.5)}>
-        <p className="section-label">Before you go further</p>
-        {results.checklist.map((item, i) => (
-          <ChecklistItem key={i} text={item} />
-        ))}
-      </motion.div>
+      <BottomLine bottomLine={results.bottom_line} fadeUp={fadeUp(0.5)} />
 
-      <VendorsNextSteps fadeUp={fadeUp(0.58)} />
-
-      <motion.button className="reset-btn" onClick={onReset} {...fadeUp(0.66)}>
+      <motion.button className="reset-btn" onClick={onReset} {...fadeUp(0.58)}>
         Start over
       </motion.button>
     </div>

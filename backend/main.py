@@ -95,7 +95,7 @@ async def assess(body: AssessRequest):
             system_size_kw=effective_system_size_kw,
         )
 
-        result = ReadinessAdvisor().assess(project)
+        result = ReadinessAdvisor().assess(project, roof_solar_potential, system_size_basis)
         result["location"] = body.location
         result["coordinates"] = {"lat": body.lat, "lon": body.lon}
         result["roof_solar_potential"] = roof_solar_potential
