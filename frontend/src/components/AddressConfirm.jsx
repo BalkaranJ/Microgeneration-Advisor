@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { API_URL } from '../config'
 
 export default function AddressConfirm({ onAnswer, error: submitError, placeholder }) {
   const [address, setAddress] = useState('')
@@ -15,7 +16,7 @@ export default function AddressConfirm({ onAnswer, error: submitError, placehold
     setCheckError(null)
 
     try {
-      const res = await fetch('http://localhost:8000/geocode', {
+      const res = await fetch(`${API_URL}/geocode`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address: trimmed }),

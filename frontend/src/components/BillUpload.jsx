@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { API_URL, BILL_UPLOAD_ENABLED } from '../config'
 
 function formatMonth(monthStr) {
   const [year, month] = (monthStr || '').split('-')
@@ -18,7 +19,7 @@ const ANNUAL_SOURCE_LABEL = {
 }
 
 export default function BillUpload({ onAnswer, error: submitError }) {
-  const [mode, setMode] = useState('upload') // 'upload' | 'manual'
+  const [mode, setMode] = useState(BILL_UPLOAD_ENABLED ? 'upload' : 'manual') // 'upload' | 'manual'
   const [status, setStatus] = useState('idle') // 'idle' | 'uploading' | 'review' | 'error'
   const [preview, setPreview] = useState(null)
   const [previewIsImage, setPreviewIsImage] = useState(true)
@@ -38,7 +39,7 @@ export default function BillUpload({ onAnswer, error: submitError }) {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      const res = await fetch('http://localhost:8000/extract-bill', {
+      const res = await fetch(`${API_URL}/extract-bill`, {
         method: 'POST',
         body: formData,
       })
@@ -111,9 +112,11 @@ export default function BillUpload({ onAnswer, error: submitError }) {
           </div>
           <button type="submit" className="submit-btn">Next →</button>
         </div>
-        <button type="button" className="link-btn" onClick={() => setMode('upload')}>
-          ← Upload a bill photo or PDF instead
-        </button>
+        {BILL_UPLOAD_ENABLED && (
+          <button type="button" className="link-btn" onClick={() => setMode('upload')}>
+            ← Upload a bill photo or PDF instead
+          </button>
+        )}
         {submitError && <p className="step-error">{submitError}</p>}
       </form>
     )

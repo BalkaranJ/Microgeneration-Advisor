@@ -6,9 +6,12 @@ are hit.
 """
 
 import asyncio
+import os
 import time
 import unittest
 from unittest.mock import AsyncMock, patch
+
+os.environ.setdefault("RATE_LIMITS_ENABLED", "false")
 
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient

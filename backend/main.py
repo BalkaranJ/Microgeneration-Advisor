@@ -6,8 +6,9 @@ FastAPI backend — exposes three endpoints:
 """
 
 import asyncio
+import os
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -22,14 +23,26 @@ from weather import geocode
 from bill_extractor import extract_bill_usage, BillExtractionError
 from solar import get_building_solar_summary, effective_rate_per_kwh, estimate_installed_cost_cad
 from roof_image import fetch_roof_image, RoofImageError
+from ratelimit import assess_limiter, extract_bill_limiter, geocode_limiter, roof_image_limiter
 
 MAX_BILL_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MB
 
 app = FastAPI()
 
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+
+
+def bill_upload_enabled() -> bool:
+    return os.environ.get("ENABLE_BILL_UPLOAD", "true").lower() != "false"
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -55,7 +68,12 @@ class AssessRequest(BaseModel):
     monthly_usage_history: list[MonthlyHistoryItem] | None = None
 
 
-@app.post("/geocode")
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.post("/geocode", dependencies=[Depends(geocode_limiter)])
 async def geocode_address(body: GeocodeRequest):
     try:
         result = await geocode(body.address)
@@ -66,7 +84,7 @@ async def geocode_address(body: GeocodeRequest):
         raise HTTPException(status_code=502, detail="Geocoding service unavailable.")
 
 
-@app.post("/assess")
+@app.post("/assess", dependencies=[Depends(assess_limiter)])
 async def assess(body: AssessRequest):
     try:
         usage_based_fallback_kw = estimate_target_system_size_kw(body.annual_usage_kwh)
@@ -112,7 +130,7 @@ async def assess(body: AssessRequest):
         raise HTTPException(status_code=500, detail="Something went wrong on our end.")
 
 
-@app.get("/roof-image")
+@app.get("/roof-image", dependencies=[Depends(roof_image_limiter)])
 async def roof_image(lat: float, lon: float):
     try:
         image_bytes = await fetch_roof_image(lat, lon)
@@ -121,8 +139,10 @@ async def roof_image(lat: float, lon: float):
     return Response(content=image_bytes, media_type="image/png")
 
 
-@app.post("/extract-bill")
+@app.post("/extract-bill", dependencies=[Depends(extract_bill_limiter)])
 async def extract_bill(file: UploadFile = File(...)):
+    if not bill_upload_enabled():
+        raise HTTPException(status_code=503, detail="Bill upload is turned off in this demo. Please enter your usage manually.")
     image_bytes = await file.read()
     if len(image_bytes) > MAX_BILL_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image is too large. Please upload a photo under 10MB.")
