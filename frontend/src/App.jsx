@@ -4,6 +4,7 @@ import Landing from './components/Landing'
 import Skyline from './components/Skyline'
 import Step from './components/Step'
 import Results from './components/Results'
+import { API_URL, BILL_UPLOAD_ENABLED } from './config'
 
 const STEPS = [
   {
@@ -16,7 +17,9 @@ const STEPS = [
   {
     id: 'annual_usage_kwh',
     question: "How much electricity do you use in a year?",
-    hint: "Upload a photo of your Enmax, Atco, or Epcor bill and we'll read it for you",
+    hint: BILL_UPLOAD_ENABLED
+      ? "Upload a photo of your Enmax, Atco, or Epcor bill and we'll read it for you"
+      : "Add up the kWh from the last 12 months on your Enmax, Atco, or Epcor bill or online account",
     type: 'bill-upload',
     unit: 'kWh',
   },
@@ -49,7 +52,7 @@ export default function App() {
         const addressMeta = newAnswers.address_meta
         const billMeta     = newAnswers.annual_usage_kwh_meta
 
-        const res = await fetch('http://localhost:8000/assess', {
+        const res = await fetch(`${API_URL}/assess`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

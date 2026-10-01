@@ -1,6 +1,7 @@
 import { motion } from 'framer-motion'
 import RoofSolarCard from './RoofSolarCard'
 import BottomLine from './BottomLine'
+import { API_URL } from '../config'
 
 const fadeUp = (delay = 0) => ({
   initial: { opacity: 0, y: 16 },
@@ -16,7 +17,7 @@ export default function Results({ results, onReset }) {
         <p className="location-name">{results.location}</p>
         {results.coordinates && (
           <img
-            src={`http://localhost:8000/roof-image?lat=${results.coordinates.lat}&lon=${results.coordinates.lon}`}
+            src={`${API_URL}/roof-image?lat=${results.coordinates.lat}&lon=${results.coordinates.lon}`}
             alt="Satellite view of the property"
             className="location-image"
             onError={e => { e.target.style.display = 'none' }}

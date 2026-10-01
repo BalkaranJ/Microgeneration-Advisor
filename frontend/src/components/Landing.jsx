@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion'
 import Skyline from './Skyline'
+import { BILL_UPLOAD_ENABLED } from '../config'
 
 export default function Landing({ onStart }) {
   return (
@@ -21,7 +22,7 @@ export default function Landing({ onStart }) {
         >
           <h1>See your solar savings, <em>before</em> you spend a dollar finding out.</h1>
           <p>
-            Enter your address and a photo of your electricity bill. SolarFit pulls real
+            Enter your address and {BILL_UPLOAD_ENABLED ? 'a photo of your electricity bill' : 'your yearly electricity usage'}. SolarFit pulls real
             satellite roof data, real historical weather, and your own usage to give you a
             plain verdict, not a sales pitch.
           </p>
@@ -49,9 +50,18 @@ export default function Landing({ onStart }) {
             <div className="how-step-row">
               <span className="how-step-num">2</span>
               <div className="how-step-body">
-                <h3>Upload a photo of your bill</h3>
-                <p>We read your usage straight off it. No typing required.</p>
-                <span className="privacy-note">⚠ Read once, then discarded. Never stored.</span>
+                {BILL_UPLOAD_ENABLED ? (
+                  <>
+                    <h3>Upload a photo of your bill</h3>
+                    <p>We read your usage straight off it. No typing required.</p>
+                    <span className="privacy-note">⚠ Read once, then discarded. Never stored.</span>
+                  </>
+                ) : (
+                  <>
+                    <h3>Enter your yearly usage</h3>
+                    <p>Total kWh over the last 12 months, from your bill or online account.</p>
+                  </>
+                )}
               </div>
             </div>
             <div className="how-step-row">
